@@ -13,9 +13,12 @@ pub fn main() !void {
     defer win.deinit();
 
     // TODO: support not-X11
+    const dpy = glfw.getX11Display(c_void) orelse {
+        return error.DisplayError;
+    };
     const surface = wgpu.base.createSurface(&.{
         .next_in_chain = &(wgpu.SurfaceDescriptorFromXlib{
-            .display = glfw.getX11Display(c_void),
+            .display = dpy,
             .window = win.getX11Window(),
         }).chain,
     });
