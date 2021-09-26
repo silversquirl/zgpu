@@ -45,6 +45,7 @@ pub fn main() !void {
             .tracePath = null,
         }).chain,
     }, requestDeviceCallback, &device);
+    defer wgpu.wgpuDeviceDrop(device);
 
     const source = try std.fs.cwd().readFileAllocOptions(
         std.heap.page_allocator,
@@ -65,6 +66,7 @@ pub fn main() !void {
         }).chain,
         .label = "shader.wgsl",
     });
+    defer wgpu.wgpuShaderModuleDrop(shader);
 
     const pipeline_layout = wgpu.wgpuDeviceCreatePipelineLayout(device, &.{
         .nextInChain = null,
@@ -72,6 +74,7 @@ pub fn main() !void {
         .bindGroupLayouts = null,
         .bindGroupLayoutCount = 0,
     });
+    defer wgpu.wgpuPipelineLayoutDrop(pipeline_layout);
 
     var swapchain_format: wgpu.WGPUTextureFormat = undefined;
     wgpu.wgpuSurfaceGetPreferredFormat(surface, adapter, preferredTextureCallback, &swapchain_format);
@@ -125,6 +128,7 @@ pub fn main() !void {
         },
         .depthStencil = null,
     });
+    defer wgpu.wgpuRenderPipelineDrop(pipeline);
 
     var prev_size = win.windowSize();
 
