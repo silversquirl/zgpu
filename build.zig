@@ -15,7 +15,6 @@ pub fn build(b: *std.build.Builder) void {
     exe.linkSystemLibrary("glfw3");
 
     exe.addLibPath("../../wgpu-native/target/release");
-    exe.addIncludeDir("../../wgpu-native/ffi");
     exe.linkSystemLibrary("wgpu_native");
 
     exe.setTarget(target);
