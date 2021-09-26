@@ -1,13 +1,12 @@
 const std = @import("std");
 const glfw = @import("glfz");
-
-const wgpu = @import("wgpu.zig");
+const zgpu = @import("zgpu");
 
 pub fn main() !void {
     try glfw.init();
     defer glfw.deinit();
 
-    const win = try glfw.Window.init(800, 600, "wgpu zig", .{
+    const win = try glfw.Window.init(800, 600, "zgpu triangle", .{
         .client_api = .none,
     });
     defer win.deinit();
@@ -16,39 +15,30 @@ pub fn main() !void {
     const dpy = glfw.getX11Display(c_void) orelse {
         return error.DisplayError;
     };
-    const surface = wgpu.base.createSurface(&.{
-        .next_in_chain = &(wgpu.SurfaceDescriptorFromXlib{
+    const surface = zgpu.base.createSurface(&.{
+        .next_in_chain = &(zgpu.SurfaceDescriptorFromXlib{
             .display = dpy,
             .window = win.getX11Window(),
         }).chain,
     });
 
-    var adapter: wgpu.Adapter = undefined;
-    wgpu.base.requestAdapter(&.{
+    var adapter: zgpu.Adapter = undefined;
+    zgpu.base.requestAdapter(&.{
         .compatible_surface = surface,
     }, requestAdapterCallback, @ptrCast(*c_void, &adapter));
 
-    var device: wgpu.Device = undefined;
+    var device: zgpu.Device = undefined;
     adapter.requestDevice(&.{
-        .next_in_chain = &(wgpu.DeviceExtras{
+        .next_in_chain = &(zgpu.DeviceExtras{
             .max_bind_groups = 1,
             .label = "Device",
         }).chain,
     }, requestDeviceCallback, @ptrCast(*c_void, &device));
     defer device.drop();
 
-    const source = try std.fs.cwd().readFileAllocOptions(
-        std.heap.page_allocator,
-        "shader.wgsl",
-        100 << 20,
-        null,
-        1,
-        0,
-    );
-    defer std.heap.page_allocator.free(source);
     const shader = device.createShaderModule(&.{
-        .next_in_chain = &(wgpu.ShaderModuleWGSLDescriptor{
-            .source = source,
+        .next_in_chain = &(zgpu.ShaderModuleWGSLDescriptor{
+            .source = @embedFile("shader.wgsl"),
         }).chain,
         .label = "shader.wgsl",
     });
@@ -62,10 +52,10 @@ pub fn main() !void {
     });
     defer pipeline_layout.drop();
 
-    var swapchain_format: wgpu.TextureFormat = undefined;
+    var swapchain_format: zgpu.TextureFormat = undefined;
     surface.getPreferredFormat(adapter, preferredTextureCallback, &swapchain_format);
 
-    const pipeline = device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
+    const pipeline = device.createRenderPipeline(&zgpu.RenderPipelineDescriptor{
         .next_in_chain = null,
         .label = "Render Pipeline",
         .layout = pipeline_layout,
@@ -94,7 +84,7 @@ pub fn main() !void {
             .module = shader,
             .entry_point = "fs_main",
             .target_count = 1,
-            .targets = &wgpu.ColorTargetState{
+            .targets = &zgpu.ColorTargetState{
                 .next_in_chain = null,
                 .format = swapchain_format,
                 .blend = &.{
@@ -150,7 +140,7 @@ pub fn main() !void {
 
         const render_pass = encoder.beginRenderPass(&.{
             .label = "Render pass",
-            .color_attachments = &[_]wgpu.RenderPassColorAttachment{.{
+            .color_attachments = &[_]zgpu.RenderPassColorAttachment{.{
                 .view = next_texture,
                 .resolve_target = null,
                 .load_op = .clear,
@@ -165,7 +155,7 @@ pub fn main() !void {
         render_pass.endPass();
 
         const queue = device.getQueue();
-        const cmd_buffer = [_]wgpu.CommandBuffer{encoder.finish(&.{})};
+        const cmd_buffer = [_]zgpu.CommandBuffer{encoder.finish(&.{})};
         queue.submit(1, &cmd_buffer);
         swapchain.present();
 
@@ -173,14 +163,14 @@ pub fn main() !void {
     }
 }
 
-fn requestAdapterCallback(received: wgpu.Adapter, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) wgpu.Adapter, userdata.?).* = received;
+fn requestAdapterCallback(received: zgpu.Adapter, userdata: ?*c_void) callconv(.C) void {
+    @ptrCast(*align(1) zgpu.Adapter, userdata.?).* = received;
 }
 
-fn requestDeviceCallback(received: wgpu.Device, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) wgpu.Device, userdata.?).* = received;
+fn requestDeviceCallback(received: zgpu.Device, userdata: ?*c_void) callconv(.C) void {
+    @ptrCast(*align(1) zgpu.Device, userdata.?).* = received;
 }
 
-fn preferredTextureCallback(format: wgpu.TextureFormat, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) wgpu.TextureFormat, userdata.?).* = format;
+fn preferredTextureCallback(format: zgpu.TextureFormat, userdata: ?*c_void) callconv(.C) void {
+    @ptrCast(*align(1) zgpu.TextureFormat, userdata.?).* = format;
 }
