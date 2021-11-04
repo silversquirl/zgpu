@@ -18,6 +18,7 @@ pub const CreateRenderPipelineAsyncCallback = fn (
 ) callconv(.C) void;
 
 pub const DeviceLostCallback = fn (
+    reason: DeviceLostReason,
     message: [*:0]const u8,
     userdata: *c_void,
 ) callconv(.C) void;
@@ -34,17 +35,16 @@ pub const QueueWorkDoneCallback = fn (
 ) callconv(.C) void;
 
 pub const RequestAdapterCallback = fn (
+    status: RequestAdapterStatus,
     adapter: Adapter,
+    message: ?[*:0]const u8,
     userdata: *c_void,
 ) callconv(.C) void;
 
 pub const RequestDeviceCallback = fn (
+    status: RequestDeviceStatus,
     device: Device,
-    userdata: *c_void,
-) callconv(.C) void;
-
-pub const SurfaceGetPreferredFormatCallback = fn (
-    format: TextureFormat,
+    message: ?[*:0]const u8,
     userdata: *c_void,
 ) callconv(.C) void;
 
@@ -56,8 +56,14 @@ extern fn wgpuGetProcAddress(device: Device, proc_name: [*:0]const u8) Proc;
 pub const Proc = fn () callconv(.C) void;
 
 pub const Adapter = *opaque {
+    pub const getLimits = wgpuAdapterGetLimits;
+    extern fn wgpuAdapterGetLimits(adapter: Adapter, limits: *SupportedLimits) void;
+
     pub const getProperties = wgpuAdapterGetProperties;
     extern fn wgpuAdapterGetProperties(adapter: Adapter, properties: *AdapterProperties) void;
+
+    pub const hasFeature = wgpuAdapterHasFeature;
+    extern fn wgpuAdapterHasFeature(adapter: Adapter, feature: FeatureName) bool;
 
     pub const requestDevice = wgpuAdapterRequestDevice;
     extern fn wgpuAdapterRequestDevice(
@@ -255,6 +261,9 @@ pub const ComputePipeline = *opaque {
     pub const getBindGroupLayout = wgpuComputePipelineGetBindGroupLayout;
     extern fn wgpuComputePipelineGetBindGroupLayout(compute_pipeline: ComputePipeline, group_index: u32) BindGroupLayout;
 
+    pub const setLabel = wgpuComputePipelineSetLabel;
+    extern fn wgpuComputePipelineSetLabel(compute_pipeline: ComputePipeline, label: ?[*:0]const u8) void;
+
     // WGPU extras
     pub const drop = wgpuComputePipelineDrop;
     extern fn wgpuComputePipelineDrop(compute_pipeline: ComputePipeline) void;
@@ -337,6 +346,11 @@ pub const Device = *opaque {
 
     pub const createTexture = wgpuDeviceCreateTexture;
     extern fn wgpuDeviceCreateTexture(device: Device, descriptor: *const TextureDescriptor) Texture;
+
+    pub const destroy = wgpuDeviceDestroy;
+    extern fn wgpuDeviceDestroy(device: Device) void;
+    pub const getLimits = wgpuDeviceGetLimits;
+    extern fn wgpuDeviceGetLimits(device: Device, limits: *SupportedLimits) bool;
 
     pub const getQueue = wgpuDeviceGetQueue;
     extern fn wgpuDeviceGetQueue(device: Device) Queue;
@@ -672,6 +686,9 @@ pub const RenderPipeline = *opaque {
     pub const getBindGroupLayout = wgpuRenderPipelineGetBindGroupLayout;
     extern fn wgpuRenderPipelineGetBindGroupLayout(render_pipeline: RenderPipeline, group_index: u32) BindGroupLayout;
 
+    pub const setLabel = wgpuRenderPipelineSetLabel;
+    extern fn wgpuRenderPipelineSetLabel(render_pipeline: RenderPipeline, label: ?[*:0]const u8) void;
+
     // WGPU extras
     pub const drop = wgpuRenderPipelineDrop;
     extern fn wgpuRenderPipelineDrop(render_pipeline: RenderPipeline) void;
@@ -684,6 +701,9 @@ pub const Sampler = *opaque {
 };
 
 pub const ShaderModule = *opaque {
+    pub const setLabel = wgpuShaderModuleSetLabel;
+    extern fn wgpuShaderModuleSetLabel(shader_module: ShaderModule, label: ?[*:0]const u8) void;
+
     // WGPU extras
     pub const drop = wgpuShaderModuleDrop;
     extern fn wgpuShaderModuleDrop(shader_module: ShaderModule) void;
@@ -694,9 +714,7 @@ pub const Surface = *opaque {
     extern fn wgpuSurfaceGetPreferredFormat(
         surface: Surface,
         adapter: Adapter,
-        callback: SurfaceGetPreferredFormatCallback,
-        userdata: *c_void,
-    ) void;
+    ) TextureFormat;
 };
 
 pub const SwapChain = *opaque {
@@ -740,6 +758,7 @@ pub const AddressMode = enum(u32) {
 
 pub const BackendType = enum(u32) {
     none,
+    webgpu,
     d3d11,
     d3d12,
     metal,
@@ -798,6 +817,12 @@ pub const CompareFunction = enum(u32) {
     always = 0x00000008,
 };
 
+pub const CompilationMessageType = enum(u32) {
+    @"error",
+    warning,
+    info,
+};
+
 pub const CreatePipelineAsyncStatus = enum(u32) {
     success = 0x00000000,
     @"error" = 0x00000001,
@@ -810,6 +835,11 @@ pub const CullMode = enum(u32) {
     none = 0x00000000,
     front = 0x00000001,
     back = 0x00000002,
+};
+
+pub const DeviceLostReason = enum(u32) {
+    @"undefined",
+    destroyed,
 };
 
 pub const ErrorFilter = enum(u32) {
@@ -826,14 +856,19 @@ pub const ErrorType = enum(u32) {
     device_lost = 0x00000004,
 };
 
+pub const FeatureName = enum(u32) {
+    @"undefined",
+    depth_clamping,
+    depth24_unorm_stencil8,
+    depth32_float_stencil8,
+    timestamp_query,
+    pipeline_statistics_query,
+    texture_compression_bc,
+};
+
 pub const FilterMode = enum(u32) {
     nearest = 0x00000000,
     linear = 0x00000001,
-};
-
-pub const InputStepMode = enum(u32) {
-    vertex,
-    instance,
 };
 
 pub const FrontFace = enum(u32) {
@@ -858,6 +893,11 @@ pub const PipelineStatisticName = enum(u32) {
     clipper_primitives_out = 0x00000002,
     fragment_shader_invocations = 0x00000003,
     compute_shader_invocations = 0x00000004,
+};
+
+pub const PowerPreference = enum(u32) {
+    low_power,
+    high_performance,
 };
 
 pub const PresentMode = enum(u32) {
@@ -885,6 +925,19 @@ pub const QueueWorkDoneStatus = enum(u32) {
     @"error" = 0x00000001,
     unknown = 0x00000002,
     device_lost = 0x00000003,
+};
+
+pub const RequestAdapterStatus = enum(u32) {
+    success,
+    unavailable,
+    @"error",
+    unknown,
+};
+
+pub const RequestDeviceStatus = enum(u32) {
+    success,
+    @"error",
+    unknown,
 };
 
 pub const SType = enum(u32) {
@@ -921,13 +974,13 @@ pub const StencilOperation = enum(u32) {
 };
 
 pub const StorageTextureAccess = enum(u32) {
-    read_only = 0x00000001,
-    write_only = 0x00000002,
+    @"undefined",
+    write_only,
 };
 
 pub const StoreOp = enum(u32) {
-    store = 0x00000000,
-    clear = 0x00000001,
+    store,
+    discard,
 };
 
 pub const TextureAspect = enum(u32) {
@@ -986,10 +1039,11 @@ pub const TextureFormat = enum(u32) {
     rgba32_float,
     rgba32_uint,
     rgba32_sint,
-    depth_32_float,
-    depth_24_plus,
-    depth_24_plus_stencil_8,
-    stencil_8,
+    stencil8,
+    depth16_unorm,
+    depth24_plus,
+    depth24_plus_stencil_8,
+    depth32_float,
     bc1_rgba_unorm,
     bc1_rgba_unorm_srgb,
     bc2_rgba_unorm,
@@ -1054,6 +1108,11 @@ pub const VertexFormat = enum(u32) {
     sint32x_2 = 0x0000001C,
     sint32x_3 = 0x0000001D,
     sint32x_4 = 0x0000001E,
+};
+
+pub const VertexStepMode = enum(u32) {
+    vertex,
+    instance,
 };
 
 fn Flags(comptime names: []const []const u8, default: bool) type {
@@ -1130,20 +1189,25 @@ pub const ShaderStage = Flags(&.{ "vertex", "fragment", "compute" }, false);
 pub const TextureUsage = Flags(&.{
     "copy_src",
     "copy_dst",
-    "sampled",
-    "storage",
+    "texture_binding",
+    "storage_binding",
     "render_attachment",
 }, false);
 
 pub const ChainedStruct = extern struct {
-    next: ?*ChainedStruct,
+    next: ?*const ChainedStruct,
+    s_type: SType,
+};
+
+pub const ChainedStructOut = extern struct {
+    next: ?*ChainedStructOut,
     s_type: SType,
 };
 
 pub const AdapterProperties = extern struct {
-    next_in_chain: ?*const ChainedStruct = null,
-    device_id: u32,
+    next_in_chain: ?*ChainedStructOut = null,
     vendor_id: u32,
+    device_id: u32,
     name: [*:0]const u8,
     driver_description: [*:0]const u8,
     adapter_type: AdapterType,
@@ -1151,6 +1215,7 @@ pub const AdapterProperties = extern struct {
 };
 
 pub const BindGroupEntry = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
     binding: u32,
     buffer: Buffer,
     offset: u64,
@@ -1160,9 +1225,9 @@ pub const BindGroupEntry = extern struct {
 };
 
 pub const BlendComponent = extern struct {
+    operation: BlendOperation,
     src_factor: BlendFactor,
     dst_factor: BlendFactor,
-    operation: BlendOperation,
 };
 
 pub const BufferBindingLayout = extern struct {
@@ -1197,13 +1262,25 @@ pub const CommandEncoderDescriptor = extern struct {
     label: ?[*:0]const u8 = null,
 };
 
+pub const CompilationMessage = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
+    message: [*:0]const u8,
+    type: CompilationMessageType,
+    line_num: u64,
+    line_pos: u64,
+    offset: u64,
+    length: u64,
+};
+
 pub const ComputePassDescriptor = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     label: ?[*:0]const u8 = null,
 };
 
-pub const DeviceDescriptor = extern struct {
+pub const ConstantEntry = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
+    key: [*:0]const u8,
+    value: f64,
 };
 
 pub const Extent3D = extern struct {
@@ -1214,6 +1291,35 @@ pub const Extent3D = extern struct {
 
 pub const InstanceDescriptor = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
+};
+
+pub const Limits = extern struct {
+    max_texture_dimension_1d: u32 = 0,
+    max_texture_dimension_2d: u32 = 0,
+    max_texture_dimension_3d: u32 = 0,
+    max_texture_array_layers: u32 = 0,
+    max_bind_groups: u32 = 0,
+    max_dynamic_uniform_buffers_per_pipeline_layout: u32 = 0,
+    max_dynamic_storage_buffers_per_pipeline_layout: u32 = 0,
+    max_sampled_textures_per_shader_stage: u32 = 0,
+    max_samplers_per_shader_stage: u32 = 0,
+    max_storage_buffers_per_shader_stage: u32 = 0,
+    max_storage_textures_per_shader_stage: u32 = 0,
+    max_uniform_buffers_per_shader_stage: u32 = 0,
+    max_uniform_buffer_binding_size: u64 = 0,
+    max_storage_buffer_binding_size: u64 = 0,
+    min_uniform_buffer_offset_alignment: u32 = 0,
+    min_storage_buffer_offset_alignment: u32 = 0,
+    max_vertex_buffers: u32 = 0,
+    max_vertex_attributes: u32 = 0,
+    max_vertex_buffer_array_stride: u32 = 0,
+    max_inter_stage_shader_components: u32 = 0,
+    max_compute_workgroup_storage_size: u32 = 0,
+    max_compute_invocations_per_workgroup: u32 = 0,
+    max_compute_workgroup_size_x: u32 = 0,
+    max_compute_workgroup_size_y: u32 = 0,
+    max_compute_workgroup_size_z: u32 = 0,
+    max_compute_workgroups_per_dimension: u32 = 0,
 };
 
 pub const MultisampleState = extern struct {
@@ -1247,12 +1353,6 @@ pub const PrimitiveState = extern struct {
     strip_index_format: IndexFormat,
     front_face: FrontFace,
     cull_mode: CullMode,
-};
-
-pub const ProgrammableStageDescriptor = extern struct {
-    next_in_chain: ?*const ChainedStruct = null,
-    module: ShaderModule,
-    entry_point: [*:0]const u8,
 };
 
 pub const QuerySetDescriptor = extern struct {
@@ -1293,6 +1393,8 @@ pub const RenderPassDepthStencilAttachment = extern struct {
 pub const RequestAdapterOptions = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     compatible_surface: Surface,
+    power_preference: PowerPreference,
+    force_fallback_adapter: bool,
 };
 
 pub const SamplerBindingLayout = extern struct {
@@ -1443,11 +1545,10 @@ pub const BlendState = extern struct {
     alpha: BlendComponent,
 };
 
-pub const ComputePipelineDescriptor = extern struct {
+pub const CompilationInfo = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
-    label: ?[*:0]const u8 = null,
-    layout: PipelineLayout,
-    compute_stage: ProgrammableStageDescriptor,
+    message_count: u32,
+    messages: [*]const CompilationMessage,
 };
 
 pub const DepthStencilState = extern struct {
@@ -1478,12 +1579,30 @@ pub const ImageCopyTexture = extern struct {
     aspect: TextureAspect,
 };
 
+pub const ProgrammableStageDescriptor = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
+    module: ShaderModule,
+    entry_point: [*:0]const u8,
+    constant_count: u32,
+    constants: [*]const ConstantEntry,
+};
+
 pub const RenderPassColorAttachment = extern struct {
     view: TextureView,
     resolve_target: ?TextureView,
     load_op: LoadOp,
     store_op: StoreOp,
     clear_color: Color,
+};
+
+pub const RequiredLimits = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
+    limits: Limits,
+};
+
+pub const SupportedLimits = extern struct {
+    next_in_chain: ?*ChainedStructOut = null,
+    limits: Limits,
 };
 
 pub const TextureDescriptor = extern struct {
@@ -1499,7 +1618,7 @@ pub const TextureDescriptor = extern struct {
 
 pub const VertexBufferLayout = extern struct {
     array_stride: u64,
-    step_mode: InputStepMode,
+    step_mode: VertexStepMode,
     attribute_count: u32,
     attributes: *VertexAttribute,
 };
@@ -1518,6 +1637,20 @@ pub const ColorTargetState = extern struct {
     write_mask: ColorWriteMask,
 };
 
+pub const ComputePipelineDescriptor = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
+    label: ?[*:0]const u8 = null,
+    layout: PipelineLayout,
+    compute: ProgrammableStageDescriptor,
+};
+
+pub const DeviceDescriptor = extern struct {
+    next_in_chain: ?*const ChainedStruct = null,
+    required_features_count: u32,
+    required_features: [*]const FeatureName,
+    required_limits: ?*const RequiredLimits,
+};
+
 pub const RenderPassDescriptor = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     label: ?[*:0]const u8 = null,
@@ -1531,16 +1664,20 @@ pub const VertexState = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     module: ShaderModule,
     entry_point: [*:0]const u8,
+    constant_count: u32,
+    constants: [*]const ConstantEntry,
     buffer_count: u32,
-    buffers: ?[*]VertexBufferLayout,
+    buffers: [*]const VertexBufferLayout,
 };
 
 pub const FragmentState = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     module: ShaderModule,
     entry_point: [*:0]const u8,
+    constant_count: u32,
+    constants: [*]const ConstantEntry,
     target_count: u32,
-    targets: *ColorTargetState,
+    targets: *const ColorTargetState,
 };
 
 pub const RenderPipelineDescriptor = extern struct {
@@ -1579,17 +1716,7 @@ pub const DeviceExtras = extern struct {
         .next = null,
         .s_type = .device_extras,
     },
-    max_texture_dimension1D: u32 = 0,
-    max_texture_dimension2D: u32 = 0,
-    max_texture_dimension3D: u32 = 0,
-    max_texture_array_layers: u32 = 0,
-    max_bind_groups: u32 = 0,
-    max_dynamic_storage_buffers_per_pipeline_layout: u32 = 0,
-    max_storage_buffers_per_shader_stage: u32 = 0,
-    max_storage_buffer_binding_size: u32 = 0,
-
     native_features: NativeFeature = .none,
-
     label: ?[*:0]const u8 = null,
     trace_path: ?[*:0]const u8 = null,
 };

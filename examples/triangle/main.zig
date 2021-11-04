@@ -25,14 +25,20 @@ pub fn main() !void {
     var adapter: zgpu.Adapter = undefined;
     zgpu.base.requestAdapter(&.{
         .compatible_surface = surface,
+        .power_preference = .high_performance,
+        .force_fallback_adapter = false,
     }, requestAdapterCallback, @ptrCast(*c_void, &adapter));
 
     var device: zgpu.Device = undefined;
     adapter.requestDevice(&.{
         .next_in_chain = &(zgpu.DeviceExtras{
-            .max_bind_groups = 1,
             .label = "Device",
         }).chain,
+        .required_features_count = 0,
+        .required_features = undefined,
+        .required_limits = &.{ .limits = .{
+            .max_bind_groups = 1,
+        } },
     }, requestDeviceCallback, @ptrCast(*c_void, &device));
     defer device.drop();
 
@@ -52,8 +58,7 @@ pub fn main() !void {
     });
     defer pipeline_layout.drop();
 
-    var swapchain_format: zgpu.TextureFormat = undefined;
-    surface.getPreferredFormat(adapter, preferredTextureCallback, &swapchain_format);
+    var swapchain_format = surface.getPreferredFormat(adapter);
 
     const pipeline = device.createRenderPipeline(&zgpu.RenderPipelineDescriptor{
         .next_in_chain = null,
@@ -63,8 +68,10 @@ pub fn main() !void {
             .next_in_chain = null,
             .module = shader,
             .entry_point = "vs_main",
+            .constant_count = 0,
+            .constants = undefined,
             .buffer_count = 0,
-            .buffers = null,
+            .buffers = undefined,
         },
         .primitive = .{
             .next_in_chain = null,
@@ -83,6 +90,8 @@ pub fn main() !void {
             .next_in_chain = null,
             .module = shader,
             .entry_point = "fs_main",
+            .constant_count = 0,
+            .constants = undefined,
             .target_count = 1,
             .targets = &zgpu.ColorTargetState{
                 .next_in_chain = null,
@@ -163,14 +172,14 @@ pub fn main() !void {
     }
 }
 
-fn requestAdapterCallback(received: zgpu.Adapter, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) zgpu.Adapter, userdata.?).* = received;
+fn requestAdapterCallback(status: zgpu.RequestAdapterStatus, adapter: zgpu.Adapter, message: ?[*:0]const u8, userdata: ?*c_void) callconv(.C) void {
+    _ = status; // TODO: check
+    _ = message;
+    @ptrCast(*align(1) zgpu.Adapter, userdata.?).* = adapter;
 }
 
-fn requestDeviceCallback(received: zgpu.Device, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) zgpu.Device, userdata.?).* = received;
-}
-
-fn preferredTextureCallback(format: zgpu.TextureFormat, userdata: ?*c_void) callconv(.C) void {
-    @ptrCast(*align(1) zgpu.TextureFormat, userdata.?).* = format;
+fn requestDeviceCallback(status: zgpu.RequestDeviceStatus, device: zgpu.Device, message: ?[*:0]const u8, userdata: ?*c_void) callconv(.C) void {
+    _ = status; // TODO: check
+    _ = message;
+    @ptrCast(*align(1) zgpu.Device, userdata.?).* = device;
 }

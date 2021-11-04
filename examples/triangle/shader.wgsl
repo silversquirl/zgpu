@@ -4,9 +4,9 @@ struct VertexOut {
 };
 
 var<private> colors: array<vec4<f32>,3> = array<vec4<f32>,3>(
-	vec4<f32>(1f, 0f, 0f, 1f),
-	vec4<f32>(0f, 1f, 0f, 1f),
-	vec4<f32>(0f, 0f, 1f, 1f),
+	vec4<f32>(1., 0., 0., 1.),
+	vec4<f32>(0., 1., 0., 1.),
+	vec4<f32>(0., 0., 1., 1.),
 );
 
 [[stage(vertex)]]
