@@ -24,6 +24,25 @@ export fn wgpuInstanceDestroy(self: *zgpu.Instance) void {
     allocator.destroy(self);
 }
 
+export fn wgpuInstanceCreateSurface(
+    instance: *zgpu.Instance,
+    desc: *const c.WGPUSurfaceDescriptor,
+) ?*zgpu.Surface {
+    const chain = desc.nextInChain orelse return null;
+    switch (chain.*.sType) {
+        c.WGPUSType_SurfaceDescriptorFromGlfwWindow => {
+            const opts = @fieldParentPtr(c.WGPUSurfaceDescriptorFromGlfwWindow, "chain", chain);
+            const self = allocator.create(zgpu.Surface) catch return null;
+            self.* = zgpu.Surface.initGlfw(instance, opts.glfwWindow) catch {
+                allocator.destroy(self);
+                return null;
+            };
+            return self;
+        },
+        else => return null,
+    }
+}
+
 export fn wgpuInstanceRequestAdapter(
     self: *zgpu.Instance,
     opts: *const c.WGPURequestAdapterOptions,
@@ -56,7 +75,7 @@ fn instanceRequestAdapterInternal(
     const adapter = try allocator.create(zgpu.Adapter);
     errdefer allocator.destroy(adapter);
     adapter.* = try zgpu.Adapter.init(self, .{
-        .compatible_surface = @ptrCast(*zgpu.Surface, opts.compatibleSurface).*,
+        .compatible_surface = convertPointer(*zgpu.Surface, opts.compatibleSurface).*,
         .power_preference = @intToEnum(zgpu.Adapter.PowerPreference, opts.powerPreference),
         .force_fallback_adapter = opts.forceFallbackAdapter,
     });
@@ -100,6 +119,19 @@ fn adapterRequestDeviceInternal(
     });
     return device;
 }
+
+export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
+//// Internal functions for conversions to Zig types
+
+/// Casts both pointer type and alignment
+fn convertPointer(comptime Ptr: type, value: anytype) Ptr {
+    return @ptrCast(Ptr, @alignCast(@alignOf(Ptr), value));
+}
+
 fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {
     var limits: zgpu.Limits = undefined;
     const wnames = comptime std.meta.fieldNames(c.WGPULimits);
@@ -109,9 +141,4 @@ fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {
         @field(limits, name) = @field(wlimits, wnames[i]);
     }
     return limits;
-}
-
-export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
-    self.deinit();
-    allocator.destroy(self);
 }

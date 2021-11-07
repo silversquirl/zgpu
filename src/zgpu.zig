@@ -96,7 +96,7 @@ pub const Instance = struct {
 };
 
 pub const Adapter = struct {
-    i: *const Instance,
+    i: *Instance,
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
 
@@ -111,7 +111,7 @@ pub const Adapter = struct {
     };
     pub const PowerPreference = enum { low_power, high_performance };
 
-    pub fn init(instance: *const Instance, opts: InitOptions) !Adapter {
+    pub fn init(instance: *Instance, opts: InitOptions) !Adapter {
         var self: Adapter = undefined;
         self.i = instance;
         const allocator = vk.allocator.unwrap(self.i.vk_alloc);
@@ -195,7 +195,7 @@ pub const Adapter = struct {
 };
 
 pub const Device = struct {
-    i: *const Instance,
+    i: *Instance,
     vkd: vk.DeviceDispatch,
     dev: vk.Device,
 
@@ -284,4 +284,24 @@ pub const Limits = struct {
     max_compute_workgroups_per_dimension: u32,
 };
 
-pub const Surface = struct {};
+pub const Surface = struct {
+    i: *Instance,
+    surf: vk.SurfaceKHR,
+
+    pub fn initGlfw(instance: *Instance, glfw_window: anytype) !Surface {
+        const win = @ptrCast(*GlfwWindow, glfw_window);
+        var surface: vk.SurfaceKHR = undefined;
+        const res = glfwCreateWindowSurface(instance.instance, win, &instance.vk_alloc, &surface);
+        // TODO: better error handling
+        switch (res) {
+            .success => {},
+            else => return error.Unexpected,
+        }
+        return Surface{
+            .i = instance,
+            .surf = surface,
+        };
+    }
+    extern fn glfwCreateWindowSurface(vk.Instance, *GlfwWindow, *vk.AllocationCallbacks, *vk.SurfaceKHR) vk.Result;
+    const GlfwWindow = opaque {};
+};
