@@ -5,8 +5,7 @@
 
 #include "webgpu-headers/webgpu.h"
 
-WGPU_EXPORT void wgpuAdapterDestroy(WGPUAdapter *adapter);
-WGPU_EXPORT void wgpuDeviceDestroy(WGPUDevice *device);
-WGPU_EXPORT void wgpuInstanceDestroy(WGPUInstance *instance);
+WGPU_EXPORT void wgpuAdapterDestroy(WGPUAdapter adapter);
+WGPU_EXPORT void wgpuInstanceDestroy(WGPUInstance instance);
 
 #endif // ZGPU_H_

@@ -251,7 +251,7 @@ pub const Device = struct {
     }
 
     pub fn deinit(self: Device) void {
-        self.vkd.destroyDevice(self.device, &self.vk_alloc);
+        self.vkd.destroyDevice(self.dev, &self.i.vk_alloc);
     }
 };
 

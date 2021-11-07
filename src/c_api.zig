@@ -64,7 +64,6 @@ fn instanceRequestAdapterInternal(
 }
 
 export fn wgpuAdapterDestroy(self: *zgpu.Adapter) void {
-    self.deinit();
     allocator.destroy(self);
 }
 

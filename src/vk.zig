@@ -14,6 +14,7 @@ pub const BaseDispatch = vk.BaseWrapper(.{
 
 pub const InstanceDispatch = vk.InstanceWrapper(.{
     .CreateDevice,
+    .DestroyInstance,
     .EnumeratePhysicalDevices,
     .GetDeviceProcAddr,
     .GetPhysicalDeviceProperties,
