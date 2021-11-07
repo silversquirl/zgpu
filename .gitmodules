@@ -1,6 +1,3 @@
 [submodule "include/webgpu-headers"]
-	path = include/webgpu-headers
-	url = https://github.com/webgpu-native/webgpu-headers
-[submodule "include/webgpu-native"]
-	path = include/webgpu-native
+	path = include/webgpu-headers/
 	url = https://github.com/webgpu-native/webgpu-headers
