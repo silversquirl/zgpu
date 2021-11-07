@@ -19,6 +19,7 @@ pub fn build(b: *std.build.Builder) void {
     };
 
     example("triangle", opts);
+    example("triangle-c", opts);
 }
 
 fn example(name: []const u8, opts: ExampleOpts) void {
@@ -31,6 +32,7 @@ fn example(name: []const u8, opts: ExampleOpts) void {
     exe.linkLibC();
     exe.linkSystemLibrary("glfw3");
     exe.addObjectFileSource(opts.wgpu);
+    exe.addIncludeDir("../wgpu-native/ffi");
 
     exe.setTarget(opts.target);
     exe.setBuildMode(opts.mode);

@@ -792,9 +792,10 @@ pub const BlendOperation = enum(u32) {
 };
 
 pub const BufferBindingType = enum(u32) {
-    uniform = 0x00000001,
-    storage = 0x00000002,
-    read_only_storage = 0x00000003,
+    @"undefined",
+    uniform,
+    storage,
+    read_only_storage,
 };
 
 pub const BufferMapAsyncStatus = enum(u32) {
@@ -1392,7 +1393,7 @@ pub const RenderPassDepthStencilAttachment = extern struct {
 
 pub const RequestAdapterOptions = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
-    compatible_surface: Surface,
+    compatible_surface: ?Surface,
     power_preference: PowerPreference,
     force_fallback_adapter: bool,
 };
@@ -1527,15 +1528,21 @@ pub const BindGroupDescriptor = extern struct {
     label: ?[*:0]const u8 = null,
     layout: BindGroupLayout,
     entry_count: u32,
-    entries: *BindGroupEntry,
+    entries: [*]BindGroupEntry,
 };
 
 pub const BindGroupLayoutEntry = extern struct {
     next_in_chain: ?*const ChainedStruct = null,
     binding: u32,
     visibility: ShaderStage,
-    buffer: BufferBindingLayout,
-    sampler: SamplerBindingLayout,
+    buffer: BufferBindingLayout = .{
+        .type = .@"undefined",
+        .has_dynamic_offset = undefined,
+        .min_binding_size = undefined,
+    },
+    sampler: SamplerBindingLayout = .{
+        .type = .@"undefined",
+    },
     texture: TextureBindingLayout,
     storage_texture: StorageTextureBindingLayout,
 };

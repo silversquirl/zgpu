@@ -10,7 +10,11 @@ pub fn lib(
 ) std.build.FileSource {
     // TODO: not-linux support
     // TODO: cross-compilation support
-    const step = RustLibStep.init(b, b.fmt("{s}/wgpu-native", .{root}), switch (linkage) {
+    const wgpu_native_path = if (std.fs.path.isAbsolute(root))
+        b.fmt("{s}/wgpu-native", .{root})
+    else
+        b.fmt("{s}/{s}/wgpu-native", .{ b.build_root, root });
+    const step = RustLibStep.init(b, wgpu_native_path, switch (linkage) {
         .static => "libwgpu_native.a",
         .dynamic => "libwgpu_native.so",
     });
