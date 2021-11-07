@@ -97,7 +97,6 @@ pub const Instance = struct {
 
 pub const Adapter = struct {
     i: *const Instance,
-    vkd: vk.DeviceDispatch,
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
 
@@ -193,6 +192,96 @@ pub const Adapter = struct {
             else => unreachable,
         };
     }
+};
+
+pub const Device = struct {
+    i: *const Instance,
+    vkd: vk.DeviceDispatch,
+    dev: vk.Device,
+
+    pub const InitOptions = struct {
+        // TODO: features
+        required_limits: Limits,
+    };
+
+    pub fn init(adapter: *const Adapter, opts: InitOptions) !Device {
+        var self: Device = undefined;
+        self.i = adapter.i;
+
+        _ = opts; // TODO: check limits are acceptable
+
+        const queue_infos = if (adapter.graphics_family == adapter.compute_family)
+            &[_]vk.DeviceQueueCreateInfo{.{
+                .flags = .{},
+                .queue_family_index = adapter.graphics_family,
+                .queue_count = 1,
+                .p_queue_priorities = &[1]f32{1.0},
+            }}
+        else
+            &[_]vk.DeviceQueueCreateInfo{ .{
+                .flags = .{},
+                .queue_family_index = adapter.graphics_family,
+                .queue_count = 1,
+                .p_queue_priorities = &[1]f32{1.0},
+            }, .{
+                .flags = .{},
+                .queue_family_index = adapter.compute_family,
+                .queue_count = 1,
+                .p_queue_priorities = &[1]f32{1.0},
+            } };
+
+        self.dev = try self.i.vki.createDevice(adapter.pdev, .{
+            .flags = .{},
+
+            .queue_create_info_count = @intCast(u32, queue_infos.len),
+            .p_queue_create_infos = queue_infos.ptr,
+
+            .enabled_layer_count = 0,
+            .pp_enabled_layer_names = undefined,
+
+            .enabled_extension_count = 0,
+            .pp_enabled_extension_names = undefined,
+
+            .p_enabled_features = null,
+        }, &self.i.vk_alloc);
+        self.vkd = try vk.DeviceDispatch.load(self.dev, self.i.vki.dispatch.vkGetDeviceProcAddr);
+        errdefer self.vkd.destroyDevice(self.dev, &self.i.vk_alloc);
+
+        return self;
+    }
+
+    pub fn deinit(self: Device) void {
+        self.vkd.destroyDevice(self.device, &self.vk_alloc);
+    }
+};
+
+pub const Limits = struct {
+    max_texture_dimension_1d: u32,
+    max_texture_dimension_2d: u32,
+    max_texture_dimension_3d: u32,
+    max_texture_array_layers: u32,
+    max_bind_groups: u32,
+    max_dynamic_uniform_buffers_per_pipeline_layout: u32,
+    max_dynamic_storage_buffers_per_pipeline_layout: u32,
+    max_sampled_textures_per_shader_stage: u32,
+    max_samplers_per_shader_stage: u32,
+    max_storage_buffers_per_shader_stage: u32,
+    max_storage_textures_per_shader_stage: u32,
+    max_uniform_buffers_per_shader_stage: u32,
+    max_uniform_buffer_binding_size: u64,
+    max_storage_buffer_binding_size: u64,
+    min_uniform_buffer_offset_alignment: u32,
+    min_storage_buffer_offset_alignment: u32,
+    max_vertex_buffers: u32,
+    max_vertex_attributes: u32,
+    max_vertex_buffer_array_stride: u32,
+    max_inter_stage_shader_components: u32,
+    max_compute_workgroup_storage_size: u32,
+    max_compute_invocations_per_workgroup: u32,
+    max_compute_workgroup_size_x: u32,
+    max_compute_workgroup_size_y: u32,
+    max_compute_workgroup_size_z: u32,
+    max_compute_workgroups_per_dimension: u32,
 };
 
 pub const Surface = struct {};

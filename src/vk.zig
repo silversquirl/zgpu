@@ -13,12 +13,16 @@ pub const BaseDispatch = vk.BaseWrapper(.{
 });
 
 pub const InstanceDispatch = vk.InstanceWrapper(.{
+    .CreateDevice,
     .EnumeratePhysicalDevices,
+    .GetDeviceProcAddr,
     .GetPhysicalDeviceProperties,
     .GetPhysicalDeviceQueueFamilyProperties,
 });
 
-pub const DeviceDispatch = vk.DeviceWrapper(.{});
+pub const DeviceDispatch = vk.DeviceWrapper(.{
+    .DestroyDevice,
+});
 
 // Simple loader for base Vulkan functions
 pub threadlocal var loader = Loader{};
