@@ -39,7 +39,7 @@ export fn wgpuInstanceCreateSurface(
             };
             return self;
         },
-        else => return null,
+        else => unreachable,
     }
 }
 
@@ -123,6 +123,25 @@ fn adapterRequestDeviceInternal(
 export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
     self.deinit();
     allocator.destroy(self);
+}
+
+export fn wgpuDeviceCreateShaderModule(
+    self: *zgpu.Device,
+    desc: *const c.WGPUShaderModuleDescriptor,
+) ?*zgpu.ShaderModule {
+    const chain = desc.nextInChain orelse return null;
+    switch (chain.*.sType) {
+        c.WGPUSType_ShaderModuleSPIRVDescriptor => {
+            const opts = @fieldParentPtr(c.WGPUShaderModuleSPIRVDescriptor, "chain", chain);
+            const shad = allocator.create(zgpu.ShaderModule) catch return null;
+            shad.* = zgpu.ShaderModule.initSpirv(self, opts.code[0..opts.codeSize]) catch {
+                allocator.destroy(shad);
+                return null;
+            };
+            return shad;
+        },
+        else => unreachable,
+    }
 }
 
 //// Internal functions for conversions to Zig types

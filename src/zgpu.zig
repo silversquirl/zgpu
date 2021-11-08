@@ -305,3 +305,43 @@ pub const Surface = struct {
     extern fn glfwCreateWindowSurface(vk.Instance, *GlfwWindow, *vk.AllocationCallbacks, *vk.SurfaceKHR) vk.Result;
     const GlfwWindow = opaque {};
 };
+
+pub const ShaderModule = struct {
+    d: *Device,
+    shad: vk.ShaderModule,
+
+    /// Create a shader module from SPIR-V source. Will autodetect the byte order.
+    pub fn initSpirv(dev: *Device, code: []const u32) !ShaderModule {
+        const spirv_magic = 0x07230203;
+        switch (code[0]) {
+            spirv_magic => return initSpirvNative(dev, code),
+
+            @byteSwap(u32, spirv_magic) => {
+                const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+                const code_native = try allocator.alloc(u32, code.len);
+                defer allocator.free(code);
+
+                for (code) |x, i| {
+                    code_native[i] = @byteSwap(u32, x);
+                }
+
+                return initSpirvNative(dev, code_native);
+            },
+
+            else => return error.InvalidShader,
+        }
+    }
+
+    fn initSpirvNative(dev: *Device, code: []const u32) !ShaderModule {
+        const shad = try dev.vkd.createShaderModule(dev.dev, .{
+            .flags = .{},
+            .code_size = 4 * code.len,
+            .p_code = code.ptr,
+        }, &dev.i.vk_alloc);
+        return ShaderModule{ .d = dev, .shad = shad };
+    }
+
+    pub fn deinit(self: ShaderModule) void {
+        self.d.vkd.destroyShaderModule(self.d.dev, self.shad, &self.d.i.vk_alloc);
+    }
+};

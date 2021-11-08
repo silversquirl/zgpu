@@ -22,6 +22,7 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
 });
 
 pub const DeviceDispatch = vk.DeviceWrapper(.{
+    .CreateShaderModule,
     .DestroyDevice,
 });
 
