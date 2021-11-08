@@ -16,5 +16,7 @@ typedef struct WGPUSurfaceDescriptorFromGlfwWindow {
 
 WGPU_EXPORT void wgpuAdapterDestroy(WGPUAdapter adapter);
 WGPU_EXPORT void wgpuInstanceDestroy(WGPUInstance instance);
+WGPU_EXPORT void wgpuPipelineLayoutDestroy(WGPUPipelineLayout layout);
+WGPU_EXPORT void wgpuShaderModuleDestory(WGPUShaderModule module);
 
 #endif // ZGPU_H_

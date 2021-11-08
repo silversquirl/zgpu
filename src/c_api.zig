@@ -165,6 +165,16 @@ export fn wgpuDeviceCreateShaderModule(
     }
 }
 
+export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
+export fn wgpuShaderModuleDestroy(self: *zgpu.ShaderModule) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
 //// Internal functions for conversions to Zig types
 
 /// Casts both pointer type and alignment
