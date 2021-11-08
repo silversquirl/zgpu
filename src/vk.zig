@@ -15,10 +15,12 @@ pub const BaseDispatch = vk.BaseWrapper(.{
 pub const InstanceDispatch = vk.InstanceWrapper(.{
     .CreateDevice,
     .DestroyInstance,
+    .DestroySurfaceKHR,
     .EnumeratePhysicalDevices,
     .GetDeviceProcAddr,
     .GetPhysicalDeviceProperties,
     .GetPhysicalDeviceQueueFamilyProperties,
+    .GetPhysicalDeviceSurfaceFormatsKHR,
 });
 
 pub const DeviceDispatch = vk.DeviceWrapper(.{

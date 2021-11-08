@@ -175,7 +175,17 @@ export fn wgpuShaderModuleDestroy(self: *zgpu.ShaderModule) void {
     allocator.destroy(self);
 }
 
-//// Internal functions for conversions to Zig types
+export fn wgpuSurfaceDestroy(self: *zgpu.Surface) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
+export fn wgpuSurfaceGetPreferredFormat(self: *zgpu.Surface, adapter: *zgpu.Adapter) c.WGPUTextureFormat {
+    const format = self.getPreferredFormat(adapter.*) catch .@"undefined";
+    return textureFormatConverter.zig2C(format);
+}
+
+//// Internal functions for conversions to and from Zig types
 
 /// Casts both pointer type and alignment
 fn convertPointer(comptime Ptr: type, value: anytype) Ptr {
@@ -191,4 +201,110 @@ fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {
         @field(limits, name) = @field(wlimits, wnames[i]);
     }
     return limits;
+}
+
+const textureFormatConverter = EnumConverter(
+    zgpu.TextureFormat,
+    c.WGPUTextureFormat,
+    c.WGPUTextureFormat_Undefined,
+    .{
+        // 8-bit formats
+        .r8_unorm = c.WGPUTextureFormat_R8Unorm,
+        .r8_snorm = c.WGPUTextureFormat_R8Snorm,
+        .r8_uint = c.WGPUTextureFormat_R8Uint,
+        .r8_sint = c.WGPUTextureFormat_R8Sint,
+
+        // 16-bit formats
+        .r16_uint = c.WGPUTextureFormat_R16Uint,
+        .r16_sint = c.WGPUTextureFormat_R16Sint,
+        .r16_sfloat = c.WGPUTextureFormat_R16Float,
+        .r8g8_unorm = c.WGPUTextureFormat_RG8Unorm,
+        .r8g8_snorm = c.WGPUTextureFormat_RG8Snorm,
+        .r8g8_uint = c.WGPUTextureFormat_RG8Uint,
+        .r8g8_sint = c.WGPUTextureFormat_RG8Sint,
+
+        // 32-bit formats
+        .r32_sfloat = c.WGPUTextureFormat_R32Float,
+        .r32_uint = c.WGPUTextureFormat_R32Uint,
+        .r32_sint = c.WGPUTextureFormat_R32Sint,
+        .r16g16_uint = c.WGPUTextureFormat_RG16Uint,
+        .r16g16_sint = c.WGPUTextureFormat_RG16Sint,
+        .r16g16_sfloat = c.WGPUTextureFormat_RG16Float,
+        .r8g8b8a8_unorm = c.WGPUTextureFormat_RGBA8Unorm,
+        .r8g8b8a8_srgb = c.WGPUTextureFormat_RGBA8UnormSrgb,
+        .r8g8b8a8_snorm = c.WGPUTextureFormat_RGBA8Snorm,
+        .r8g8b8a8_uint = c.WGPUTextureFormat_RGBA8Uint,
+        .r8g8b8a8_sint = c.WGPUTextureFormat_RGBA8Sint,
+        .b8g8r8a8_unorm = c.WGPUTextureFormat_BGRA8Unorm,
+        .b8g8r8a8_srgb = c.WGPUTextureFormat_BGRA8UnormSrgb,
+        .a2b10g10r10_unorm_pack32 = c.WGPUTextureFormat_RGB10A2Unorm,
+        .b10g11r11_ufloat_pack32 = c.WGPUTextureFormat_RG11B10Ufloat,
+        .e5b9g9r9_ufloat_pack32 = c.WGPUTextureFormat_RGB9E5Ufloat,
+
+        // 64-bit formats
+        .r32g32_sfloat = c.WGPUTextureFormat_RG32Float,
+        .r32g32_uint = c.WGPUTextureFormat_RG32Uint,
+        .r32g32_sint = c.WGPUTextureFormat_RG32Sint,
+        .r16g16b16a16_uint = c.WGPUTextureFormat_RGBA16Uint,
+        .r16g16b16a16_sint = c.WGPUTextureFormat_RGBA16Sint,
+        .r16g16b16a16_sfloat = c.WGPUTextureFormat_RGBA16Float,
+
+        // 128-bit formats
+        .r32g32b32a32_sfloat = c.WGPUTextureFormat_RGBA32Float,
+        .r32g32b32a32_uint = c.WGPUTextureFormat_RGBA32Uint,
+        .r32g32b32a32_sint = c.WGPUTextureFormat_RGBA32Sint,
+
+        // Depth and stencil formats
+        .s8_uint = c.WGPUTextureFormat_Stencil8,
+        .d16_unorm = c.WGPUTextureFormat_Depth16Unorm,
+        .x8_d24_unorm_pack32 = c.WGPUTextureFormat_Depth24Plus,
+        .d24_unorm_s8_uint = c.WGPUTextureFormat_Depth24PlusStencil8,
+        .d32_sfloat = c.WGPUTextureFormat_Depth32Float,
+
+        // BC compressed formats
+        .bc1_rgba_unorm_block = c.WGPUTextureFormat_BC1RGBAUnorm,
+        .bc1_rgba_srgb_block = c.WGPUTextureFormat_BC1RGBAUnormSrgb,
+        .bc2_unorm_block = c.WGPUTextureFormat_BC2RGBAUnorm,
+        .bc2_srgb_block = c.WGPUTextureFormat_BC2RGBAUnormSrgb,
+        .bc3_unorm_block = c.WGPUTextureFormat_BC3RGBAUnorm,
+        .bc3_srgb_block = c.WGPUTextureFormat_BC3RGBAUnormSrgb,
+        .bc4_unorm_block = c.WGPUTextureFormat_BC4RUnorm,
+        .bc4_snorm_block = c.WGPUTextureFormat_BC4RSnorm,
+        .bc5_unorm_block = c.WGPUTextureFormat_BC5RGUnorm,
+        .bc5_snorm_block = c.WGPUTextureFormat_BC5RGSnorm,
+        .bc6h_ufloat_block = c.WGPUTextureFormat_BC6HRGBUfloat,
+        .bc6h_sfloat_block = c.WGPUTextureFormat_BC6HRGBFloat,
+        .bc7_unorm_block = c.WGPUTextureFormat_BC7RGBAUnorm,
+        .bc7_srgb_block = c.WGPUTextureFormat_BC7RGBAUnormSrgb,
+    },
+);
+
+fn EnumConverter(
+    comptime Z: type,
+    comptime C: type,
+    comptime default: C,
+    comptime values: std.enums.EnumFieldStruct(Z, C, default),
+) type {
+    return struct {
+        const Self = @This();
+        const zig_names = std.meta.fieldNames(@TypeOf(values));
+
+        pub fn zig2C(v: Z) C {
+            inline for (zig_names) |name| {
+                if (v == @field(Z, name)) {
+                    return @field(values, name);
+                }
+            }
+            unreachable;
+        }
+
+        pub fn c2Zig(v: C) Z {
+            inline for (zig_names) |name| {
+                if (v == @field(values, name)) {
+                    return @field(Z, name);
+                }
+            }
+            unreachable;
+        }
+    };
 }

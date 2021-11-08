@@ -304,6 +304,23 @@ pub const Surface = struct {
     }
     extern fn glfwCreateWindowSurface(vk.Instance, *GlfwWindow, *vk.AllocationCallbacks, *vk.SurfaceKHR) vk.Result;
     const GlfwWindow = opaque {};
+
+    pub fn deinit(self: Surface) void {
+        self.i.vki.destroySurfaceKHR(self.i.instance, self.surf, &self.i.vk_alloc);
+    }
+
+    pub fn getPreferredFormat(self: Surface, adapter: Adapter) !TextureFormat {
+        // TODO: using the first one might not be the correct thing to do here
+        var count: u32 = 1;
+        var formats: [1]vk.SurfaceFormatKHR = undefined;
+        _ = try adapter.i.vki.getPhysicalDeviceSurfaceFormatsKHR(
+            adapter.pdev,
+            self.surf,
+            &count,
+            &formats,
+        );
+        return formats[0].format;
+    }
 };
 
 pub const ShaderModule = struct {
@@ -380,3 +397,5 @@ pub const PipelineLayout = struct {
         self.d.vkd.destroyPipelineLayout(self.d.dev, self.layout, &self.d.i.vk_alloc);
     }
 };
+
+pub const TextureFormat = vk.Format;
