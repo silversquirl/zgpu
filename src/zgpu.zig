@@ -345,3 +345,38 @@ pub const ShaderModule = struct {
         self.d.vkd.destroyShaderModule(self.d.dev, self.shad, &self.d.i.vk_alloc);
     }
 };
+
+pub const BindGroupLayout = struct {
+    d: *Device,
+    layout: vk.DescriptorSetLayout,
+
+    // TODO
+};
+
+pub const PipelineLayout = struct {
+    d: *Device,
+    layout: vk.PipelineLayout,
+
+    pub fn init(dev: *Device, bind_layouts: []const BindGroupLayout) !PipelineLayout {
+        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+        const set_layouts = try allocator.alloc(vk.DescriptorSetLayout, bind_layouts.len);
+        defer allocator.free(set_layouts);
+        for (bind_layouts) |layout, i| {
+            set_layouts[i] = layout.layout;
+        }
+
+        const pipeline_layout = try dev.vkd.createPipelineLayout(dev.dev, .{
+            .flags = .{},
+            .set_layout_count = @intCast(u32, set_layouts.len),
+            .p_set_layouts = set_layouts.ptr,
+            .push_constant_range_count = 0,
+            .p_push_constant_ranges = undefined,
+        }, &dev.i.vk_alloc);
+
+        return PipelineLayout{ .d = dev, .layout = pipeline_layout };
+    }
+
+    pub fn deinit(self: PipelineLayout) void {
+        self.d.vkd.destroyPipelineLayout(self.d.dev, self.layout, &self.d.i.vk_alloc);
+    }
+};

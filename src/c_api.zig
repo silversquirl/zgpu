@@ -125,6 +125,27 @@ export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
     allocator.destroy(self);
 }
 
+export fn wgpuDeviceCreatePipelineLayout(
+    self: *zgpu.Device,
+    opts: *const c.WGPUPipelineLayoutDescriptor,
+) ?*zgpu.PipelineLayout {
+    return deviceCreatePipelineInternal(self, opts) catch null;
+}
+fn deviceCreatePipelineInternal(
+    self: *zgpu.Device,
+    opts: *const c.WGPUPipelineLayoutDescriptor,
+) !*zgpu.PipelineLayout {
+    const layouts = try allocator.alloc(zgpu.BindGroupLayout, opts.bindGroupLayoutCount);
+    defer allocator.free(layouts);
+    for (opts.bindGroupLayouts[0..opts.bindGroupLayoutCount]) |layout, i| {
+        layouts[i] = convertPointer(*zgpu.BindGroupLayout, layout).*;
+    }
+
+    const layout = try allocator.create(zgpu.PipelineLayout);
+    layout.* = try zgpu.PipelineLayout.init(self, layouts);
+    return layout;
+}
+
 export fn wgpuDeviceCreateShaderModule(
     self: *zgpu.Device,
     desc: *const c.WGPUShaderModuleDescriptor,
