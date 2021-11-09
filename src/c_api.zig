@@ -129,9 +129,9 @@ export fn wgpuDeviceCreatePipelineLayout(
     self: *zgpu.Device,
     opts: *const c.WGPUPipelineLayoutDescriptor,
 ) ?*zgpu.PipelineLayout {
-    return deviceCreatePipelineInternal(self, opts) catch null;
+    return deviceCreatePipelineLayoutInternal(self, opts) catch null;
 }
-fn deviceCreatePipelineInternal(
+fn deviceCreatePipelineLayoutInternal(
     self: *zgpu.Device,
     opts: *const c.WGPUPipelineLayoutDescriptor,
 ) !*zgpu.PipelineLayout {
@@ -144,6 +144,18 @@ fn deviceCreatePipelineInternal(
     const layout = try allocator.create(zgpu.PipelineLayout);
     layout.* = try zgpu.PipelineLayout.init(self, layouts);
     return layout;
+}
+
+export fn wgpuDeviceCreateRenderPipeline(
+    self: *zgpu.Device,
+    opts: *const c.WGPURenderPipelineDescriptor,
+) ?*zgpu.RenderPipeline {
+    const pipeline = allocator.create(zgpu.RenderPipeline) catch return null;
+    pipeline.* = try zgpu.RenderPipeline.create(self, .{}) catch {
+        allocator.destroy(pipeline);
+        return null;
+    };
+    return pipeline;
 }
 
 export fn wgpuDeviceCreateShaderModule(

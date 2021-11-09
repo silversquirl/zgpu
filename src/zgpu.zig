@@ -399,3 +399,277 @@ pub const PipelineLayout = struct {
 };
 
 pub const TextureFormat = vk.Format;
+
+pub const ConstantEntry = struct {
+    key: [:0]const u8,
+    value: f64,
+};
+
+pub const IndexFormat = enum {
+    uint16,
+    uint32,
+};
+
+pub const CompareFunction = vk.CompareOp;
+
+pub const RenderPipeline = struct {
+    d: *Device,
+    pipeline: vk.Pipeline,
+
+    pub const InitOptions = struct {
+        layout: PipelineLayout,
+        vertex: VertexState,
+        primitive: PrimitiveState = .{},
+        depth_stencil: ?DepthStencilState,
+        multisample: MultisampleState = .{},
+        fragment: ?FragmentState,
+    };
+
+    pub const VertexState = struct {
+        module: ShaderModule,
+        entry_point: [:0]const u8,
+        constants: []const ConstantEntry,
+        buffers: []const BufferLayout = &.{},
+
+        pub const BufferLayout = struct {
+            array_stride: u64,
+            step_mode: StepMode = .vertex,
+            attributes: []const Attribute,
+        };
+
+        pub const StepMode = enum { vertex, instance };
+
+        pub const Attribute = struct {
+            format: Format,
+            offset: u64,
+            shader_location: u32,
+        };
+
+        pub const Format = enum {
+            // 8-bit int vectors
+            uint8x2,
+            uint8x4,
+            sint8x2,
+            sint8x4,
+            unorm8x2,
+            unorm8x4,
+            snorm8x2,
+            snorm8x4,
+
+            // 16-bit int vectors
+            uint16x2,
+            uint16x4,
+            sint16x2,
+            sint16x4,
+            unorm16x2,
+            unorm16x4,
+            snorm16x2,
+            snorm16x4,
+
+            // 32-bit float vectors
+            float32,
+            float32x2,
+            float32x3,
+            float32x4,
+
+            // 32-bit int vectors
+            uint32,
+            uint32x2,
+            uint32x3,
+            uint32x4,
+            sint32,
+            sint32x2,
+            sint32x3,
+            sint32x4,
+        };
+    };
+
+    pub const PrimitiveState = struct {
+        topology: Topology = .triangle_list,
+        strip_index_format: ?IndexFormat = null,
+        front_face: FrontFace = .ccw,
+        cull_mode: CullMode = .none,
+
+        pub const Topology = enum {
+            point_list,
+            line_list,
+            line_strip,
+            triangle_list,
+            triangle_strip,
+        };
+
+        pub const FrontFace = enum { ccw, cw };
+        pub const CullMode = enum { none, front, back };
+    };
+
+    pub const DepthStencilState = struct {
+        format: TextureFormat,
+        depth_write_enabled: bool = false,
+        depth_compare: CompareFunction = .always,
+        stencil_front: FaceState = .{},
+        stencil_back: FaceState = .{},
+        stencil_read_mask: u32 = ~@as(u32, 0),
+        stencil_write_mask: u32 = ~@as(u32, 0),
+        depth_bias: i32 = 0,
+        depth_bias_slope_scale: f32 = 0,
+        depth_bias_clamp: f32 = 0,
+
+        pub const FaceState = struct {
+            compare: CompareFunction = .always,
+            fail_op: Operation = .keep,
+            depth_fail_op: Operation = .keep,
+            pass_op: Operation = .keep,
+
+            pub const Operation = enum {
+                keep,
+                zero,
+                replace,
+                invert,
+                increment_clamp,
+                decrement_clamp,
+                increment_wrap,
+                decrement_wrap,
+            };
+        };
+    };
+
+    pub const MultisampleState = struct {
+        count: u32 = 1,
+        mask: u32 = ~@as(u32, 0),
+        alpha_to_coverage_enabled: bool = false,
+    };
+
+    pub const FragmentState = struct {
+        module: ShaderModule,
+        entry_point: [:0]const u8,
+        constants: []const ConstantEntry,
+        targets: []const ColorTargetState,
+
+        pub const ColorTargetState = struct {
+            format: TextureFormat,
+            blend: BlendState,
+            write_mask: ColorWriteFlags = .{
+                .red = true,
+                .green = true,
+                .blue = true,
+                .alpha = true,
+            },
+
+            pub const ColorWriteFlags = struct {
+                red: bool = false,
+                green: bool = false,
+                blue: bool = false,
+                alpha: bool = false,
+            };
+        };
+
+        pub const BlendState = struct {
+            color: Component,
+            alpha: Component,
+
+            pub const Component = struct {
+                operation: Operation = .add,
+                src_factor: Factor = .one,
+                dst_factor: Factor = .zero,
+            };
+
+            pub const Operation = enum {
+                add,
+                subtract,
+                reverse_subtract,
+                min,
+                max,
+            };
+
+            pub const Factor = enum {
+                zero,
+                one,
+                src,
+                one_minus_src,
+                src_alpha,
+                one_minus_src_alpha,
+                dst,
+                one_minus_dst,
+                dst_alpha,
+                one_minus_dst_alpha,
+                src_alpha_saturated,
+                constant,
+                one_minus_constant,
+            };
+        };
+    };
+
+    pub fn init(dev: *Device, opts: InitOptions) !RenderPipeline {
+        // Create shader stage info
+        var shader_stages: [2]vk.PipelineShaderStageCreateInfo = undefined;
+        var stage_count: u32 = 1;
+        shader_stages[0] = .{
+            .flags = .{},
+            .stage = .{ .vertex_bit = true },
+            .module = opts.vertex.module.shad,
+            .p_name = opts.vertex.entry_point,
+            .p_specialization_info = null, // TODO: specialization constants
+        };
+        std.debug.assert(opts.vertex.constants.len == 0); // TODO: specialization constants
+
+        if (opts.fragment) |frag_state| {
+            shader_stages[1] = .{
+                .flags = .{},
+                .stage = .{ .fragment_bit = true },
+                .module = frag_state.module.shad,
+                .p_name = frag_state.entry_point,
+                .p_specialization_info = null,
+            };
+            std.debug.assert(frag_state.constants.len == 0); // TODO: specialization constants
+            stage_count += 1;
+        }
+
+        // Create render pass
+        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+        const attachments = if (opts.fragment) |frag| blk: {
+            const attachments = try allocator.alloc(vk.AttachmentDescription, frag.targets.len);
+            for (frag.targets) |target, i| {
+                attachments[i] = .{
+                    .flags = .{ .may_alias_bit = true }, // TODO: do we actually need this? Check spec
+                };
+            }
+        } else &.{};
+        defer if (attachments.len != 0) allocator.free(attachments);
+        const render_pass = dev.vkd.createRenderPass(dev.dev, .{
+            .flags = .{},
+            .attachment_count = @intCast(u32, attachments.len),
+            .p_attachments = attachments.ptr,
+            .subpass_count = 0,
+            .p_subpasses = undefined,
+            .dependency_count = 0,
+            .p_dependencies = undefined,
+        }, &dev.i.vk_alloc);
+
+        // Create pipeline
+        var pipelines: [1]vk.Pipeline = undefined;
+        try dev.vkd.createGraphicsPipelines(dev.dev, .null_handle, 1, [1]vk.GraphicsPipelineCreateInfo{.{
+            .flags = .{},
+
+            .stage_count = stage_count,
+            .p_stages = &shader_stages,
+
+            .p_vertex_input_state = &.{},
+            .p_input_assembly_state = &.{},
+            .p_tessellation_state = null,
+            .p_viewport_state = &.{},
+            .p_rasterization_state = &.{},
+            .p_multisample_state = &.{},
+            .p_depth_stencil_state = &.{},
+            .p_color_blend_state = &.{},
+            .p_dynamic_state = null,
+
+            .layout = opts.layout.layout,
+            .render_pass = render_pass,
+            .subpass = 0,
+
+            .base_pipeline_handle = .null_handle,
+            .base_pipeline_index = -1,
+        }}, &dev.i.vk_alloc, &pipelines);
+        return RenderPipeline{ .d = dev, .pipeline = pipelines[0] };
+    }
+};
