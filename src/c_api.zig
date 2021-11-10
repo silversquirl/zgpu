@@ -150,11 +150,181 @@ export fn wgpuDeviceCreateRenderPipeline(
     self: *zgpu.Device,
     opts: *const c.WGPURenderPipelineDescriptor,
 ) ?*zgpu.RenderPipeline {
-    const pipeline = allocator.create(zgpu.RenderPipeline) catch return null;
-    pipeline.* = try zgpu.RenderPipeline.create(self, .{}) catch {
-        allocator.destroy(pipeline);
-        return null;
-    };
+    return deviceCreateRenderPipelineInternal(self, opts) catch null;
+}
+fn deviceCreateRenderPipelineInternal(
+    self: *zgpu.Device,
+    opts: *const c.WGPURenderPipelineDescriptor,
+) !*zgpu.RenderPipeline {
+    // Convert vertex state data
+    const vconstants = try allocator.alloc(zgpu.ConstantEntry, opts.vertex.constantCount);
+    defer allocator.free(vconstants);
+    for (opts.vertex.constants[0..opts.vertex.constantCount]) |constant, i| {
+        vconstants[i] = .{
+            .key = std.mem.span(constant.key),
+            .value = constant.value,
+        };
+    }
+
+    var vattrs = std.ArrayList(zgpu.RenderPipeline.VertexState.Attribute).init(allocator);
+    defer vattrs.deinit();
+    for (opts.vertex.buffers[0..opts.vertex.bufferCount]) |buffer| {
+        for (buffer.attributes[0..buffer.attributeCount]) |attr| {
+            try vattrs.append(.{
+                .format = switch (attr.format) {
+                    c.WGPUVertexFormat_Uint8x2 => .uint8x2,
+                    c.WGPUVertexFormat_Uint8x4 => .uint8x4,
+                    c.WGPUVertexFormat_Sint8x2 => .sint8x2,
+                    c.WGPUVertexFormat_Sint8x4 => .sint8x4,
+                    c.WGPUVertexFormat_Unorm8x2 => .unorm8x2,
+                    c.WGPUVertexFormat_Unorm8x4 => .unorm8x4,
+                    c.WGPUVertexFormat_Snorm8x2 => .snorm8x2,
+                    c.WGPUVertexFormat_Snorm8x4 => .snorm8x4,
+                    c.WGPUVertexFormat_Uint16x2 => .uint16x2,
+                    c.WGPUVertexFormat_Uint16x4 => .uint16x4,
+                    c.WGPUVertexFormat_Sint16x2 => .sint16x2,
+                    c.WGPUVertexFormat_Sint16x4 => .sint16x4,
+                    c.WGPUVertexFormat_Unorm16x2 => .unorm16x2,
+                    c.WGPUVertexFormat_Unorm16x4 => .unorm16x4,
+                    c.WGPUVertexFormat_Snorm16x2 => .snorm16x2,
+                    c.WGPUVertexFormat_Snorm16x4 => .snorm16x4,
+                    c.WGPUVertexFormat_Float16x2 => .float16x2,
+                    c.WGPUVertexFormat_Float16x4 => .float16x4,
+                    c.WGPUVertexFormat_Float32 => .float32,
+                    c.WGPUVertexFormat_Float32x2 => .float32x2,
+                    c.WGPUVertexFormat_Float32x3 => .float32x3,
+                    c.WGPUVertexFormat_Float32x4 => .float32x4,
+                    c.WGPUVertexFormat_Uint32 => .uint32,
+                    c.WGPUVertexFormat_Uint32x2 => .uint32x2,
+                    c.WGPUVertexFormat_Uint32x3 => .uint32x3,
+                    c.WGPUVertexFormat_Uint32x4 => .uint32x4,
+                    c.WGPUVertexFormat_Sint32 => .sint32,
+                    c.WGPUVertexFormat_Sint32x2 => .sint32x2,
+                    c.WGPUVertexFormat_Sint32x3 => .sint32x3,
+                    c.WGPUVertexFormat_Sint32x4 => .sint32x4,
+                    else => unreachable,
+                },
+                .offset = @intCast(u32, attr.offset),
+                .shader_location = attr.shaderLocation,
+            });
+        }
+    }
+
+    const vbuffers = try allocator.alloc(zgpu.RenderPipeline.VertexState.BufferLayout, opts.vertex.bufferCount);
+    defer allocator.free(vbuffers);
+    var attr_i: usize = 0;
+    for (opts.vertex.buffers[0..opts.vertex.bufferCount]) |buffer, i| {
+        vbuffers[i] = .{
+            .array_stride = @intCast(u32, buffer.arrayStride),
+            .step_mode = switch (buffer.stepMode) {
+                c.WGPUVertexStepMode_Vertex => .vertex,
+                c.WGPUVertexStepMode_Instance => .instance,
+                else => unreachable,
+            },
+            .attributes = vattrs.items[attr_i .. attr_i + buffer.attributeCount],
+        };
+        attr_i += buffer.attributeCount;
+    }
+    std.debug.assert(attr_i == vattrs.items.len);
+
+    // Convert fragment state data
+    var fconstants: []zgpu.ConstantEntry = &.{};
+    defer allocator.free(fconstants);
+    var ftargets: []zgpu.RenderPipeline.FragmentState.ColorTargetState = &.{};
+    defer allocator.free(ftargets);
+    if (opts.fragment) |frag| {
+        fconstants = try allocator.alloc(zgpu.ConstantEntry, frag.*.constantCount);
+        for (frag.*.constants[0..frag.*.constantCount]) |constant, i| {
+            fconstants[i] = .{
+                .key = std.mem.span(constant.key),
+                .value = constant.value,
+            };
+        }
+
+        ftargets = try allocator.alloc(zgpu.RenderPipeline.FragmentState.ColorTargetState, frag.*.targetCount);
+        for (frag.*.targets[0..frag.*.targetCount]) |target, i| {
+            ftargets[i] = .{
+                .format = textureFormatConverter.c2Zig(target.format),
+                .blend = if (target.blend) |blend| .{
+                    .color = convertBlendComponent(blend.*.color),
+                    .alpha = convertBlendComponent(blend.*.alpha),
+                } else null,
+                .write_mask = .{
+                    .red = target.writeMask & c.WGPUColorWriteMask_Red != 0,
+                    .green = target.writeMask & c.WGPUColorWriteMask_Green != 0,
+                    .blue = target.writeMask & c.WGPUColorWriteMask_Blue != 0,
+                    .alpha = target.writeMask & c.WGPUColorWriteMask_Alpha != 0,
+                },
+            };
+        }
+    }
+
+    // Create pipeline
+    const pipeline = try allocator.create(zgpu.RenderPipeline);
+    pipeline.* = try zgpu.RenderPipeline.init(self, .{
+        .layout = convertPointer(*zgpu.PipelineLayout, opts.layout).*,
+
+        .vertex = .{
+            .module = convertPointer(*zgpu.ShaderModule, opts.vertex.module).*,
+            .entry_point = std.mem.span(opts.vertex.entryPoint),
+            .constants = vconstants,
+            .buffers = vbuffers,
+        },
+
+        .primitive = .{
+            .topology = switch (opts.primitive.topology) {
+                c.WGPUPrimitiveTopology_PointList => .point_list,
+                c.WGPUPrimitiveTopology_LineList => .line_list,
+                c.WGPUPrimitiveTopology_LineStrip => .line_list,
+                c.WGPUPrimitiveTopology_TriangleList => .triangle_list,
+                c.WGPUPrimitiveTopology_TriangleStrip => .triangle_list,
+                else => unreachable,
+            },
+            .strip_index_format = switch (opts.primitive.stripIndexFormat) {
+                c.WGPUIndexFormat_Undefined => null,
+                c.WGPUIndexFormat_Uint16 => .uint16,
+                c.WGPUIndexFormat_Uint32 => .uint32,
+                else => unreachable,
+            },
+            .front_face = switch (opts.primitive.frontFace) {
+                c.WGPUFrontFace_CCW => .ccw,
+                c.WGPUFrontFace_CW => .cw,
+                else => unreachable,
+            },
+            .cull_mode = switch (opts.primitive.cullMode) {
+                c.WGPUCullMode_None => .none,
+                c.WGPUCullMode_Front => .front,
+                c.WGPUCullMode_Back => .back,
+                else => unreachable,
+            },
+        },
+
+        .depth_stencil = if (opts.depthStencil) |depth_stencil| .{
+            .format = textureFormatConverter.c2Zig(depth_stencil.*.format),
+            .depth_write_enabled = depth_stencil.*.depthWriteEnabled,
+            .depth_compare = compareFunctionConverter.c2Zig(depth_stencil.*.depthCompare),
+            .stencil_front = convertStencilFaceState(depth_stencil.*.stencilFront),
+            .stencil_back = convertStencilFaceState(depth_stencil.*.stencilBack),
+            .stencil_read_mask = depth_stencil.*.stencilReadMask,
+            .stencil_write_mask = depth_stencil.*.stencilWriteMask,
+            .depth_bias = depth_stencil.*.depthBias,
+            .depth_bias_slope_scale = depth_stencil.*.depthBiasSlopeScale,
+            .depth_bias_clamp = depth_stencil.*.depthBiasClamp,
+        } else null,
+
+        .multisample = .{
+            .count = opts.multisample.count,
+            .mask = opts.multisample.mask,
+            .alpha_to_coverage_enabled = opts.multisample.alphaToCoverageEnabled,
+        },
+
+        .fragment = if (opts.fragment) |frag| .{
+            .module = convertPointer(*zgpu.ShaderModule, frag.*.module).*,
+            .entry_point = std.mem.span(frag.*.entryPoint),
+            .constants = fconstants,
+            .targets = ftargets,
+        } else null,
+    });
     return pipeline;
 }
 
@@ -178,6 +348,11 @@ export fn wgpuDeviceCreateShaderModule(
 }
 
 export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
+export fn wgpuRenderPipelineDestroy(self: *zgpu.RenderPipeline) void {
     self.deinit();
     allocator.destroy(self);
 }
@@ -213,6 +388,62 @@ fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {
         @field(limits, name) = @field(wlimits, wnames[i]);
     }
     return limits;
+}
+
+fn convertStencilFaceState(state: c.WGPUStencilFaceState) zgpu.RenderPipeline.DepthStencilState.FaceState {
+    return .{
+        .compare = compareFunctionConverter.c2Zig(state.compare),
+        .fail_op = convertStencilOperation(state.failOp),
+        .depth_fail_op = convertStencilOperation(state.depthFailOp),
+        .pass_op = convertStencilOperation(state.passOp),
+    };
+}
+fn convertStencilOperation(op: c.WGPUStencilOperation) zgpu.RenderPipeline.DepthStencilState.FaceState.Operation {
+    return switch (op) {
+        c.WGPUStencilOperation_Keep => .keep,
+        c.WGPUStencilOperation_Zero => .zero,
+        c.WGPUStencilOperation_Replace => .replace,
+        c.WGPUStencilOperation_Invert => .invert,
+        c.WGPUStencilOperation_IncrementClamp => .increment_and_clamp,
+        c.WGPUStencilOperation_DecrementClamp => .decrement_and_clamp,
+        c.WGPUStencilOperation_IncrementWrap => .increment_and_wrap,
+        c.WGPUStencilOperation_DecrementWrap => .decrement_and_wrap,
+        else => unreachable,
+    };
+}
+
+fn convertBlendComponent(comp: c.WGPUBlendComponent) zgpu.RenderPipeline.FragmentState.BlendState.Component {
+    return .{
+        .operation = switch (comp.operation) {
+            c.WGPUBlendOperation_Add => .add,
+            c.WGPUBlendOperation_Subtract => .subtract,
+            c.WGPUBlendOperation_ReverseSubtract => .reverse_subtract,
+            c.WGPUBlendOperation_Min => .min,
+            c.WGPUBlendOperation_Max => .max,
+            else => unreachable,
+        },
+        .src_factor = convertBlendFactor(comp.srcFactor),
+        .dst_factor = convertBlendFactor(comp.dstFactor),
+    };
+}
+fn convertBlendFactor(fac: c.WGPUBlendFactor) zgpu.RenderPipeline.FragmentState.BlendState.Factor {
+    return switch (fac) {
+        c.WGPUBlendFactor_Zero => .zero,
+        c.WGPUBlendFactor_One => .one,
+        c.WGPUBlendFactor_Src => .src_color,
+        c.WGPUBlendFactor_OneMinusSrc => .one_minus_src_color,
+        c.WGPUBlendFactor_SrcAlpha => .src_alpha,
+        c.WGPUBlendFactor_OneMinusSrcAlpha => .one_minus_src_alpha,
+        c.WGPUBlendFactor_Dst => .dst_color,
+        c.WGPUBlendFactor_OneMinusDst => .one_minus_dst_color,
+        c.WGPUBlendFactor_DstAlpha => .dst_alpha,
+        c.WGPUBlendFactor_OneMinusDstAlpha => .one_minus_dst_alpha,
+        c.WGPUBlendFactor_SrcAlphaSaturated => .src_alpha_saturate,
+        // FIXME: constant might differ depending on whether it's alpha or color, maybe don't use the vk type here
+        c.WGPUBlendFactor_Constant => .constant_color,
+        c.WGPUBlendFactor_OneMinusConstant => .one_minus_constant_color,
+        else => unreachable,
+    };
 }
 
 const textureFormatConverter = EnumConverter(
@@ -288,6 +519,22 @@ const textureFormatConverter = EnumConverter(
         .bc6h_sfloat_block = c.WGPUTextureFormat_BC6HRGBFloat,
         .bc7_unorm_block = c.WGPUTextureFormat_BC7RGBAUnorm,
         .bc7_srgb_block = c.WGPUTextureFormat_BC7RGBAUnormSrgb,
+    },
+);
+
+const compareFunctionConverter = EnumConverter(
+    zgpu.CompareFunction,
+    c.WGPUCompareFunction,
+    c.WGPUCompareFunction_Undefined,
+    .{
+        .never = c.WGPUCompareFunction_Never,
+        .less = c.WGPUCompareFunction_Less,
+        .less_or_equal = c.WGPUCompareFunction_LessEqual,
+        .greater = c.WGPUCompareFunction_Greater,
+        .greater_or_equal = c.WGPUCompareFunction_GreaterEqual,
+        .equal = c.WGPUCompareFunction_Equal,
+        .not_equal = c.WGPUCompareFunction_NotEqual,
+        .always = c.WGPUCompareFunction_Always,
     },
 );
 

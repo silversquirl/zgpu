@@ -24,11 +24,15 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
 });
 
 pub const DeviceDispatch = vk.DeviceWrapper(.{
+    .CreateGraphicsPipelines,
     .CreatePipelineLayout,
+    .CreateRenderPass,
     .CreateShaderModule,
     .DestroyDevice,
     .DestroyPipelineLayout,
     .DestroyShaderModule,
+    .DestroyRenderPass,
+    .DestroyPipeline,
 });
 
 // Simple loader for base Vulkan functions

@@ -242,7 +242,7 @@ pub const Device = struct {
             .enabled_extension_count = 0,
             .pp_enabled_extension_names = undefined,
 
-            .p_enabled_features = null,
+            .p_enabled_features = null, // TODO: independent blending, etc
         }, &self.i.vk_alloc);
         self.vkd = try vk.DeviceDispatch.load(self.dev, self.i.vki.dispatch.vkGetDeviceProcAddr);
         errdefer self.vkd.destroyDevice(self.dev, &self.i.vk_alloc);
@@ -415,14 +415,15 @@ pub const CompareFunction = vk.CompareOp;
 pub const RenderPipeline = struct {
     d: *Device,
     pipeline: vk.Pipeline,
+    pass: vk.RenderPass,
 
     pub const InitOptions = struct {
         layout: PipelineLayout,
         vertex: VertexState,
         primitive: PrimitiveState = .{},
-        depth_stencil: ?DepthStencilState,
+        depth_stencil: ?DepthStencilState = null,
         multisample: MultisampleState = .{},
-        fragment: ?FragmentState,
+        fragment: ?FragmentState = null,
     };
 
     pub const VertexState = struct {
@@ -432,16 +433,16 @@ pub const RenderPipeline = struct {
         buffers: []const BufferLayout = &.{},
 
         pub const BufferLayout = struct {
-            array_stride: u64,
+            array_stride: u32,
             step_mode: StepMode = .vertex,
             attributes: []const Attribute,
         };
 
-        pub const StepMode = enum { vertex, instance };
+        pub const StepMode = vk.VertexInputRate;
 
         pub const Attribute = struct {
             format: Format,
-            offset: u64,
+            offset: u32,
             shader_location: u32,
         };
 
@@ -465,6 +466,10 @@ pub const RenderPipeline = struct {
             unorm16x4,
             snorm16x2,
             snorm16x4,
+
+            // 16-bit float vectors
+            float16x2,
+            float16x4,
 
             // 32-bit float vectors
             float32,
@@ -490,14 +495,7 @@ pub const RenderPipeline = struct {
         front_face: FrontFace = .ccw,
         cull_mode: CullMode = .none,
 
-        pub const Topology = enum {
-            point_list,
-            line_list,
-            line_strip,
-            triangle_list,
-            triangle_strip,
-        };
-
+        pub const Topology = vk.PrimitiveTopology;
         pub const FrontFace = enum { ccw, cw };
         pub const CullMode = enum { none, front, back };
     };
@@ -520,16 +518,7 @@ pub const RenderPipeline = struct {
             depth_fail_op: Operation = .keep,
             pass_op: Operation = .keep,
 
-            pub const Operation = enum {
-                keep,
-                zero,
-                replace,
-                invert,
-                increment_clamp,
-                decrement_clamp,
-                increment_wrap,
-                decrement_wrap,
-            };
+            pub const Operation = vk.StencilOp;
         };
     };
 
@@ -547,7 +536,7 @@ pub const RenderPipeline = struct {
 
         pub const ColorTargetState = struct {
             format: TextureFormat,
-            blend: BlendState,
+            blend: ?BlendState,
             write_mask: ColorWriteFlags = .{
                 .red = true,
                 .green = true,
@@ -555,7 +544,7 @@ pub const RenderPipeline = struct {
                 .alpha = true,
             },
 
-            pub const ColorWriteFlags = struct {
+            pub const ColorWriteFlags = packed struct {
                 red: bool = false,
                 green: bool = false,
                 blue: bool = false,
@@ -573,33 +562,60 @@ pub const RenderPipeline = struct {
                 dst_factor: Factor = .zero,
             };
 
-            pub const Operation = enum {
-                add,
-                subtract,
-                reverse_subtract,
-                min,
-                max,
-            };
-
-            pub const Factor = enum {
-                zero,
-                one,
-                src,
-                one_minus_src,
-                src_alpha,
-                one_minus_src_alpha,
-                dst,
-                one_minus_dst,
-                dst_alpha,
-                one_minus_dst_alpha,
-                src_alpha_saturated,
-                constant,
-                one_minus_constant,
-            };
+            pub const Operation = vk.BlendOp;
+            pub const Factor = vk.BlendFactor;
         };
     };
 
     pub fn init(dev: *Device, opts: InitOptions) !RenderPipeline {
+        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+
+        // TODO: Snektron/vulkan-zig#27
+        const multisample_count_vk: vk.SampleCountFlags = switch (opts.multisample.count) {
+            1 => .{ .@"1_bit" = true },
+            2 => .{ .@"2_bit" = true },
+            4 => .{ .@"4_bit" = true },
+            8 => .{ .@"8_bit" = true },
+            16 => .{ .@"16_bit" = true },
+            32 => .{ .@"32_bit" = true },
+            else => unreachable,
+        };
+
+        // Create render pass
+        // TODO: may be best to defer vulkan render pass (and hence pipeline) creation until it's
+        //       used with a render pass? Would require recreating the pipeline if it's used again
+        //       with an incompatible render pass.
+        var attachments: []vk.AttachmentDescription = &.{};
+        defer allocator.free(attachments);
+        if (opts.fragment) |frag| {
+            // FIXME: depth_stencil target needs to go in here too
+            attachments = try allocator.alloc(vk.AttachmentDescription, frag.targets.len);
+            for (frag.targets) |target, i| {
+                attachments[i] = .{
+                    .flags = .{ .may_alias_bit = true }, // TODO: do we actually need this? Check spec
+                    .format = target.format,
+                    .samples = multisample_count_vk,
+                    .load_op = .load,
+                    .store_op = .store,
+                    .stencil_load_op = .load,
+                    .stencil_store_op = .store,
+                    .initial_layout = .general,
+                    .final_layout = .general,
+                };
+            }
+        }
+
+        const render_pass = try dev.vkd.createRenderPass(dev.dev, .{
+            .flags = .{},
+            .attachment_count = @intCast(u32, attachments.len),
+            .p_attachments = attachments.ptr,
+            .subpass_count = 0,
+            .p_subpasses = undefined,
+            .dependency_count = 0,
+            .p_dependencies = undefined,
+        }, &dev.i.vk_alloc);
+        errdefer dev.vkd.destroyRenderPass(dev.dev, render_pass, &dev.i.vk_alloc);
+
         // Create shader stage info
         var shader_stages: [2]vk.PipelineShaderStageCreateInfo = undefined;
         var stage_count: u32 = 1;
@@ -624,44 +640,222 @@ pub const RenderPipeline = struct {
             stage_count += 1;
         }
 
-        // Create render pass
-        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
-        const attachments = if (opts.fragment) |frag| blk: {
-            const attachments = try allocator.alloc(vk.AttachmentDescription, frag.targets.len);
-            for (frag.targets) |target, i| {
-                attachments[i] = .{
-                    .flags = .{ .may_alias_bit = true }, // TODO: do we actually need this? Check spec
-                };
+        // Create vertex state info
+        const vbinds = try allocator.alloc(vk.VertexInputBindingDescription, opts.vertex.buffers.len);
+        defer allocator.free(vbinds);
+        var vattrs = std.ArrayList(vk.VertexInputAttributeDescription).init(allocator);
+        defer vattrs.deinit();
+        for (opts.vertex.buffers) |buf, i| {
+            const bind = @intCast(u32, i);
+            vbinds[i] = .{
+                .binding = bind,
+                .stride = buf.array_stride,
+                .input_rate = buf.step_mode,
+            };
+            for (buf.attributes) |attr| {
+                try vattrs.append(.{
+                    .location = attr.shader_location,
+                    .binding = bind,
+                    .format = switch (attr.format) {
+                        .uint8x2 => .r8g8_uint,
+                        .uint8x4 => .r8g8b8a8_uint,
+                        .sint8x2 => .r8g8_sint,
+                        .sint8x4 => .r8g8b8a8_sint,
+                        .unorm8x2 => .r8g8_unorm,
+                        .unorm8x4 => .r8g8b8a8_unorm,
+                        .snorm8x2 => .r8g8_snorm,
+                        .snorm8x4 => .r8g8b8a8_snorm,
+
+                        .uint16x2 => .r16g16_uint,
+                        .uint16x4 => .r16g16b16a16_uint,
+                        .sint16x2 => .r16g16_sint,
+                        .sint16x4 => .r16g16b16a16_sint,
+                        .unorm16x2 => .r16g16_unorm,
+                        .unorm16x4 => .r16g16b16a16_unorm,
+                        .snorm16x2 => .r16g16_snorm,
+                        .snorm16x4 => .r16g16b16a16_snorm,
+
+                        .float16x2 => .r16g16_sfloat,
+                        .float16x4 => .r16g16b16a16_sfloat,
+
+                        .float32 => .r16_sfloat,
+                        .float32x2 => .r16g16_sfloat,
+                        .float32x3 => .r16g16b16_sfloat,
+                        .float32x4 => .r16g16b16a16_sfloat,
+
+                        .uint32 => .r32_uint,
+                        .uint32x2 => .r32g32_uint,
+                        .uint32x3 => .r32g32b32_uint,
+                        .uint32x4 => .r32g32b32a32_uint,
+                        .sint32 => .r32_sint,
+                        .sint32x2 => .r32g32_sint,
+                        .sint32x3 => .r32g32b32_sint,
+                        .sint32x4 => .r32g32b32a32_sint,
+                    },
+                    .offset = attr.offset,
+                });
             }
-        } else &.{};
-        defer if (attachments.len != 0) allocator.free(attachments);
-        const render_pass = dev.vkd.createRenderPass(dev.dev, .{
-            .flags = .{},
-            .attachment_count = @intCast(u32, attachments.len),
-            .p_attachments = attachments.ptr,
-            .subpass_count = 0,
-            .p_subpasses = undefined,
-            .dependency_count = 0,
-            .p_dependencies = undefined,
-        }, &dev.i.vk_alloc);
+        }
+
+        // Create blend attachment info
+        var blend_attachments = try allocator.alloc(vk.PipelineColorBlendAttachmentState, attachments.len);
+        defer allocator.free(blend_attachments);
+        for (blend_attachments) |*vk_blend, i| {
+            const target = opts.fragment.?.targets[i];
+            if (target.blend) |blend| {
+                vk_blend.* = .{
+                    .blend_enable = vk.TRUE,
+                    .src_color_blend_factor = blend.color.src_factor,
+                    .dst_color_blend_factor = blend.color.dst_factor,
+                    .color_blend_op = blend.color.operation,
+                    .src_alpha_blend_factor = blend.alpha.src_factor,
+                    .dst_alpha_blend_factor = blend.alpha.dst_factor,
+                    .alpha_blend_op = blend.alpha.operation,
+                    .color_write_mask = .{
+                        .r_bit = target.write_mask.red,
+                        .g_bit = target.write_mask.green,
+                        .b_bit = target.write_mask.blue,
+                        .a_bit = target.write_mask.alpha,
+                    },
+                };
+            } else {
+                vk_blend.blend_enable = vk.FALSE;
+            }
+        }
 
         // Create pipeline
         var pipelines: [1]vk.Pipeline = undefined;
-        try dev.vkd.createGraphicsPipelines(dev.dev, .null_handle, 1, [1]vk.GraphicsPipelineCreateInfo{.{
+        _ = try dev.vkd.createGraphicsPipelines(dev.dev, .null_handle, 1, &[1]vk.GraphicsPipelineCreateInfo{.{
             .flags = .{},
 
             .stage_count = stage_count,
             .p_stages = &shader_stages,
 
-            .p_vertex_input_state = &.{},
-            .p_input_assembly_state = &.{},
+            .p_vertex_input_state = &.{
+                .flags = .{},
+                .vertex_binding_description_count = @intCast(u32, vbinds.len),
+                .p_vertex_binding_descriptions = vbinds.ptr,
+                .vertex_attribute_description_count = @intCast(u32, vattrs.items.len),
+                .p_vertex_attribute_descriptions = vattrs.items.ptr,
+            },
+
+            .p_input_assembly_state = &.{
+                .flags = .{},
+                .topology = opts.primitive.topology,
+                .primitive_restart_enable = vk.FALSE,
+            },
+
             .p_tessellation_state = null,
-            .p_viewport_state = &.{},
-            .p_rasterization_state = &.{},
-            .p_multisample_state = &.{},
-            .p_depth_stencil_state = &.{},
-            .p_color_blend_state = &.{},
-            .p_dynamic_state = null,
+
+            .p_viewport_state = &.{
+                .flags = .{},
+                .viewport_count = 1,
+                .p_viewports = undefined, // Dynamic
+                .scissor_count = 1,
+                .p_scissors = undefined, // Dynamic
+            },
+
+            .p_rasterization_state = &.{
+                .flags = .{},
+                .depth_clamp_enable = vk.FALSE,
+                .rasterizer_discard_enable = vk.FALSE,
+                .polygon_mode = .fill, // TODO: Having a "wireframe" extension might be nice for debugging
+                .cull_mode = switch (opts.primitive.cull_mode) {
+                    .none => vk.CullModeFlags{},
+                    .front => .{ .front_bit = true },
+                    .back => .{ .back_bit = true },
+                },
+                .front_face = switch (opts.primitive.front_face) {
+                    .ccw => vk.FrontFace.counter_clockwise,
+                    .cw => .clockwise,
+                },
+
+                // TODO: I'm mostly guessing on how this works. The WebGPU spec doesn't really cover it
+                // TODO: this code is ugly as fuck, think about how to clean it up
+                .depth_bias_enable = if (opts.depth_stencil) |ds|
+                    @boolToInt(ds.depth_bias != 0 or ds.depth_bias_slope_scale != 0)
+                else
+                    vk.FALSE,
+                .depth_bias_constant_factor = if (opts.depth_stencil) |ds|
+                    @intToFloat(f32, ds.depth_bias)
+                else
+                    undefined,
+                .depth_bias_clamp = if (opts.depth_stencil) |ds|
+                    ds.depth_bias_clamp
+                else
+                    undefined,
+                .depth_bias_slope_factor = if (opts.depth_stencil) |ds|
+                    ds.depth_bias_slope_scale
+                else
+                    undefined,
+
+                .line_width = 1,
+            },
+
+            .p_multisample_state = &.{
+                .flags = .{},
+                .rasterization_samples = multisample_count_vk,
+                .sample_shading_enable = vk.FALSE,
+                .min_sample_shading = undefined,
+                .p_sample_mask = &[1]u32{opts.multisample.mask},
+                .alpha_to_coverage_enable = @boolToInt(opts.multisample.alpha_to_coverage_enabled),
+                .alpha_to_one_enable = vk.FALSE,
+            },
+
+            .p_depth_stencil_state = if (opts.depth_stencil) |ds| &.{
+                .flags = .{},
+                .depth_test_enable = vk.TRUE,
+                .depth_write_enable = @boolToInt(ds.depth_write_enabled),
+                .depth_compare_op = ds.depth_compare,
+                .depth_bounds_test_enable = vk.FALSE,
+                .stencil_test_enable = @boolToInt(ds.stencil_read_mask != 0 or ds.stencil_write_mask != 0),
+                .front = .{
+                    .fail_op = ds.stencil_front.fail_op,
+                    .depth_fail_op = ds.stencil_front.depth_fail_op,
+                    .pass_op = ds.stencil_front.pass_op,
+                    .compare_op = ds.stencil_front.compare,
+                    .compare_mask = ds.stencil_read_mask,
+                    .write_mask = ds.stencil_write_mask,
+                    .reference = 0,
+                },
+                .back = .{
+                    .fail_op = ds.stencil_back.fail_op,
+                    .depth_fail_op = ds.stencil_back.depth_fail_op,
+                    .pass_op = ds.stencil_back.pass_op,
+                    .compare_op = ds.stencil_back.compare,
+                    .compare_mask = ds.stencil_read_mask,
+                    .write_mask = ds.stencil_write_mask,
+                    .reference = 0,
+                },
+                .min_depth_bounds = undefined,
+                .max_depth_bounds = undefined,
+            } else &.{
+                .flags = .{},
+                .depth_test_enable = vk.FALSE,
+                .depth_write_enable = undefined,
+                .depth_compare_op = undefined,
+                .depth_bounds_test_enable = vk.FALSE,
+                .stencil_test_enable = vk.FALSE,
+                .front = undefined,
+                .back = undefined,
+                .min_depth_bounds = undefined,
+                .max_depth_bounds = undefined,
+            },
+
+            .p_color_blend_state = &.{
+                .flags = .{},
+                .logic_op_enable = vk.FALSE,
+                .logic_op = undefined,
+                .attachment_count = @intCast(u32, blend_attachments.len),
+                .p_attachments = blend_attachments.ptr,
+                .blend_constants = .{ 0, 0, 0, 0 },
+            },
+
+            .p_dynamic_state = &.{
+                .flags = .{},
+                .dynamic_state_count = dynamic_states.len,
+                .p_dynamic_states = &dynamic_states,
+            },
 
             .layout = opts.layout.layout,
             .render_pass = render_pass,
@@ -670,6 +864,20 @@ pub const RenderPipeline = struct {
             .base_pipeline_handle = .null_handle,
             .base_pipeline_index = -1,
         }}, &dev.i.vk_alloc, &pipelines);
-        return RenderPipeline{ .d = dev, .pipeline = pipelines[0] };
+        return RenderPipeline{
+            .d = dev,
+            .pipeline = pipelines[0],
+            .pass = render_pass,
+        };
+    }
+
+    const dynamic_states = [_]vk.DynamicState{
+        .viewport, .scissor, .stencil_reference, .blend_constants,
+        // TODO: lots more
+    };
+
+    pub fn deinit(self: RenderPipeline) void {
+        self.d.vkd.destroyPipeline(self.d.dev, self.pipeline, &self.d.i.vk_alloc);
+        self.d.vkd.destroyRenderPass(self.d.dev, self.pass, &self.d.i.vk_alloc);
     }
 };
