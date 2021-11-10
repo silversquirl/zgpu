@@ -18,7 +18,7 @@ comptime {
 }
 
 pub const Instance = struct {
-    vk_alloc: vk.AllocationCallbacks,
+    vk_alloc: ?vk.AllocationCallbacks,
     vkb: vk.BaseDispatch,
     vki: vk.InstanceDispatch,
     instance: vk.Instance,
@@ -67,9 +67,9 @@ pub const Instance = struct {
             .pp_enabled_layer_names = &layers,
             .enabled_extension_count = 0,
             .pp_enabled_extension_names = undefined,
-        }, &self.vk_alloc);
+        }, self.vkAlloc());
         self.vki = try vk.InstanceDispatch.load(self.instance, self.vkb.dispatch.vkGetInstanceProcAddr);
-        errdefer self.vki.destroyInstance(self.instance, &self.vk_alloc);
+        errdefer self.vki.destroyInstance(self.instance, self.vkAlloc());
 
         return self;
     }
@@ -90,13 +90,17 @@ pub const Instance = struct {
     }
 
     pub fn deinit(self: Instance) void {
-        self.vki.destroyInstance(self.instance, &self.vk_alloc);
+        self.vki.destroyInstance(self.instance, self.vkAlloc());
         vk.loader.deref();
+    }
+
+    fn vkAlloc(self: *const Instance) ?*const vk.AllocationCallbacks {
+        return if (self.vk_alloc) |*r| r else null;
     }
 };
 
 pub const Adapter = struct {
-    i: *Instance,
+    i: *const Instance, // Not needed here, but Device needs it
     pdev: vk.PhysicalDevice,
     props: vk.PhysicalDeviceProperties,
 
@@ -111,10 +115,10 @@ pub const Adapter = struct {
     };
     pub const PowerPreference = enum { low_power, high_performance };
 
-    pub fn init(instance: *Instance, opts: InitOptions) !Adapter {
+    pub fn init(instance: *const Instance, opts: InitOptions) !Adapter {
         var self: Adapter = undefined;
         self.i = instance;
-        const allocator = vk.allocator.unwrap(self.i.vk_alloc);
+        const allocator = vk.allocator.unwrap(self.i.vkAlloc());
 
         var n_devices: u32 = undefined;
         _ = try self.i.vki.enumeratePhysicalDevices(self.i.instance, &n_devices, null);
@@ -195,7 +199,7 @@ pub const Adapter = struct {
 };
 
 pub const Device = struct {
-    i: *Instance,
+    vk_alloc: ?*const vk.AllocationCallbacks,
     vkd: vk.DeviceDispatch,
     dev: vk.Device,
 
@@ -206,7 +210,7 @@ pub const Device = struct {
 
     pub fn init(adapter: *const Adapter, opts: InitOptions) !Device {
         var self: Device = undefined;
-        self.i = adapter.i;
+        self.vk_alloc = adapter.i.vkAlloc();
 
         _ = opts; // TODO: check limits are acceptable
 
@@ -230,7 +234,7 @@ pub const Device = struct {
                 .p_queue_priorities = &[1]f32{1.0},
             } };
 
-        self.dev = try self.i.vki.createDevice(adapter.pdev, .{
+        self.dev = try adapter.i.vki.createDevice(adapter.pdev, .{
             .flags = .{},
 
             .queue_create_info_count = @intCast(u32, queue_infos.len),
@@ -243,15 +247,15 @@ pub const Device = struct {
             .pp_enabled_extension_names = undefined,
 
             .p_enabled_features = null, // TODO: independent blending, etc
-        }, &self.i.vk_alloc);
-        self.vkd = try vk.DeviceDispatch.load(self.dev, self.i.vki.dispatch.vkGetDeviceProcAddr);
-        errdefer self.vkd.destroyDevice(self.dev, &self.i.vk_alloc);
+        }, self.vk_alloc);
+        self.vkd = try vk.DeviceDispatch.load(self.dev, adapter.i.vki.dispatch.vkGetDeviceProcAddr);
+        errdefer self.vkd.destroyDevice(self.dev, self.vk_alloc);
 
         return self;
     }
 
     pub fn deinit(self: Device) void {
-        self.vkd.destroyDevice(self.dev, &self.i.vk_alloc);
+        self.vkd.destroyDevice(self.dev, self.vk_alloc);
     }
 };
 
@@ -285,13 +289,13 @@ pub const Limits = struct {
 };
 
 pub const Surface = struct {
-    i: *Instance,
+    i: *const Instance,
     surf: vk.SurfaceKHR,
 
-    pub fn initGlfw(instance: *Instance, glfw_window: anytype) !Surface {
+    pub fn initGlfw(instance: *const Instance, glfw_window: anytype) !Surface {
         const win = @ptrCast(*GlfwWindow, glfw_window);
         var surface: vk.SurfaceKHR = undefined;
-        const res = glfwCreateWindowSurface(instance.instance, win, &instance.vk_alloc, &surface);
+        const res = glfwCreateWindowSurface(instance.instance, win, instance.vkAlloc(), &surface);
         // TODO: better error handling
         switch (res) {
             .success => {},
@@ -302,11 +306,11 @@ pub const Surface = struct {
             .surf = surface,
         };
     }
-    extern fn glfwCreateWindowSurface(vk.Instance, *GlfwWindow, *vk.AllocationCallbacks, *vk.SurfaceKHR) vk.Result;
+    extern fn glfwCreateWindowSurface(vk.Instance, *GlfwWindow, ?*const vk.AllocationCallbacks, *vk.SurfaceKHR) vk.Result;
     const GlfwWindow = opaque {};
 
     pub fn deinit(self: Surface) void {
-        self.i.vki.destroySurfaceKHR(self.i.instance, self.surf, &self.i.vk_alloc);
+        self.i.vki.destroySurfaceKHR(self.i.instance, self.surf, self.i.vkAlloc());
     }
 
     pub fn getPreferredFormat(self: Surface, adapter: Adapter) !TextureFormat {
@@ -324,17 +328,17 @@ pub const Surface = struct {
 };
 
 pub const ShaderModule = struct {
-    d: *Device,
+    d: *const Device,
     shad: vk.ShaderModule,
 
     /// Create a shader module from SPIR-V source. Will autodetect the byte order.
-    pub fn initSpirv(dev: *Device, code: []const u32) !ShaderModule {
+    pub fn initSpirv(dev: *const Device, code: []const u32) !ShaderModule {
         const spirv_magic = 0x07230203;
         switch (code[0]) {
             spirv_magic => return initSpirvNative(dev, code),
 
             @byteSwap(u32, spirv_magic) => {
-                const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+                const allocator = vk.allocator.unwrap(dev.vk_alloc);
                 const code_native = try allocator.alloc(u32, code.len);
                 defer allocator.free(code);
 
@@ -349,33 +353,33 @@ pub const ShaderModule = struct {
         }
     }
 
-    fn initSpirvNative(dev: *Device, code: []const u32) !ShaderModule {
+    fn initSpirvNative(dev: *const Device, code: []const u32) !ShaderModule {
         const shad = try dev.vkd.createShaderModule(dev.dev, .{
             .flags = .{},
             .code_size = 4 * code.len,
             .p_code = code.ptr,
-        }, &dev.i.vk_alloc);
+        }, dev.vk_alloc);
         return ShaderModule{ .d = dev, .shad = shad };
     }
 
     pub fn deinit(self: ShaderModule) void {
-        self.d.vkd.destroyShaderModule(self.d.dev, self.shad, &self.d.i.vk_alloc);
+        self.d.vkd.destroyShaderModule(self.d.dev, self.shad, self.d.vk_alloc);
     }
 };
 
 pub const BindGroupLayout = struct {
-    d: *Device,
+    d: *const Device,
     layout: vk.DescriptorSetLayout,
 
     // TODO
 };
 
 pub const PipelineLayout = struct {
-    d: *Device,
+    d: *const Device,
     layout: vk.PipelineLayout,
 
-    pub fn init(dev: *Device, bind_layouts: []const BindGroupLayout) !PipelineLayout {
-        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+    pub fn init(dev: *const Device, bind_layouts: []const BindGroupLayout) !PipelineLayout {
+        const allocator = vk.allocator.unwrap(dev.vk_alloc);
         const set_layouts = try allocator.alloc(vk.DescriptorSetLayout, bind_layouts.len);
         defer allocator.free(set_layouts);
         for (bind_layouts) |layout, i| {
@@ -388,13 +392,13 @@ pub const PipelineLayout = struct {
             .p_set_layouts = set_layouts.ptr,
             .push_constant_range_count = 0,
             .p_push_constant_ranges = undefined,
-        }, &dev.i.vk_alloc);
+        }, dev.vk_alloc);
 
         return PipelineLayout{ .d = dev, .layout = pipeline_layout };
     }
 
     pub fn deinit(self: PipelineLayout) void {
-        self.d.vkd.destroyPipelineLayout(self.d.dev, self.layout, &self.d.i.vk_alloc);
+        self.d.vkd.destroyPipelineLayout(self.d.dev, self.layout, self.d.vk_alloc);
     }
 };
 
@@ -413,7 +417,7 @@ pub const IndexFormat = enum {
 pub const CompareFunction = vk.CompareOp;
 
 pub const RenderPipeline = struct {
-    d: *Device,
+    d: *const Device,
     pipeline: vk.Pipeline,
     pass: vk.RenderPass,
 
@@ -567,8 +571,8 @@ pub const RenderPipeline = struct {
         };
     };
 
-    pub fn init(dev: *Device, opts: InitOptions) !RenderPipeline {
-        const allocator = vk.allocator.unwrap(dev.i.vk_alloc);
+    pub fn init(dev: *const Device, opts: InitOptions) !RenderPipeline {
+        const allocator = vk.allocator.unwrap(dev.vk_alloc);
 
         // TODO: Snektron/vulkan-zig#27
         const multisample_count_vk: vk.SampleCountFlags = switch (opts.multisample.count) {
@@ -613,8 +617,8 @@ pub const RenderPipeline = struct {
             .p_subpasses = undefined,
             .dependency_count = 0,
             .p_dependencies = undefined,
-        }, &dev.i.vk_alloc);
-        errdefer dev.vkd.destroyRenderPass(dev.dev, render_pass, &dev.i.vk_alloc);
+        }, dev.vk_alloc);
+        errdefer dev.vkd.destroyRenderPass(dev.dev, render_pass, dev.vk_alloc);
 
         // Create shader stage info
         var shader_stages: [2]vk.PipelineShaderStageCreateInfo = undefined;
@@ -863,7 +867,7 @@ pub const RenderPipeline = struct {
 
             .base_pipeline_handle = .null_handle,
             .base_pipeline_index = -1,
-        }}, &dev.i.vk_alloc, &pipelines);
+        }}, dev.vk_alloc, &pipelines);
         return RenderPipeline{
             .d = dev,
             .pipeline = pipelines[0],
@@ -877,7 +881,7 @@ pub const RenderPipeline = struct {
     };
 
     pub fn deinit(self: RenderPipeline) void {
-        self.d.vkd.destroyPipeline(self.d.dev, self.pipeline, &self.d.i.vk_alloc);
-        self.d.vkd.destroyRenderPass(self.d.dev, self.pass, &self.d.i.vk_alloc);
+        self.d.vkd.destroyPipeline(self.d.dev, self.pipeline, self.d.vk_alloc);
+        self.d.vkd.destroyRenderPass(self.d.dev, self.pass, self.d.vk_alloc);
     }
 };
