@@ -347,6 +347,36 @@ export fn wgpuDeviceCreateShaderModule(
     }
 }
 
+export fn wgpuDeviceCreateSwapChain(
+    self: *zgpu.Device,
+    surf: *zgpu.Surface,
+    opts: *const c.WGPUSwapChainDescriptor,
+) ?*zgpu.SwapChain {
+    const swapchain = allocator.create(zgpu.SwapChain) catch return null;
+    swapchain.* = zgpu.SwapChain.init(self, surf.*, .{
+        .usage = .{
+            .copy_src = opts.usage & c.WGPUTextureUsage_CopySrc != 0,
+            .copy_dst = opts.usage & c.WGPUTextureUsage_CopyDst != 0,
+            .texture_binding = opts.usage & c.WGPUTextureUsage_TextureBinding != 0,
+            .storage_binding = opts.usage & c.WGPUTextureUsage_StorageBinding != 0,
+            .render_attachment = opts.usage & c.WGPUTextureUsage_RenderAttachment != 0,
+        },
+        .format = textureFormatConverter.c2Zig(opts.format),
+        .width = opts.width,
+        .height = opts.height,
+        .present_mode = switch (opts.presentMode) {
+            c.WGPUPresentMode_Immediate => .immediate,
+            c.WGPUPresentMode_Mailbox => .mailbox,
+            c.WGPUPresentMode_Fifo => .fifo,
+            else => unreachable,
+        },
+    }) catch {
+        allocator.destroy(swapchain);
+        return null;
+    };
+    return swapchain;
+}
+
 export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
     self.deinit();
     allocator.destroy(self);
@@ -367,9 +397,60 @@ export fn wgpuSurfaceDestroy(self: *zgpu.Surface) void {
     allocator.destroy(self);
 }
 
+export fn wgpuSwapChainDestroy(self: *zgpu.SwapChain) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+export fn wgpuSwapChainGetCurrentTextureView(self: *zgpu.SwapChain) ?*zgpu.TextureView {
+    const view = allocator.create(zgpu.TextureView) catch return null;
+    view.* = self.getCurrentTextureView() catch {
+        allocator.destroy(view);
+        return null;
+    };
+    return view;
+}
+
 export fn wgpuSurfaceGetPreferredFormat(self: *zgpu.Surface, adapter: *zgpu.Adapter) c.WGPUTextureFormat {
     const format = self.getPreferredFormat(adapter.*) catch .@"undefined";
     return textureFormatConverter.zig2C(format);
+}
+
+export fn wgpuTextureCreateView(
+    self: *zgpu.Texture,
+    opts: c.WGPUTextureViewDescriptor,
+) ?*zgpu.TextureView {
+    const view = allocator.create(zgpu.TextureView) catch return null;
+    view.* = zgpu.TextureView.init(self.*, .{
+        .format = textureFormatConverter.c2Zig(opts.format),
+        .dimension = switch (opts.dimension) {
+            c.WGPUTextureViewDimension_1D => .@"1d",
+            c.WGPUTextureViewDimension_2D => .@"2d",
+            c.WGPUTextureViewDimension_2DArray => .@"2d_array",
+            c.WGPUTextureViewDimension_Cube => .@"cube",
+            c.WGPUTextureViewDimension_CubeArray => .@"cube_array",
+            c.WGPUTextureViewDimension_3D => .@"3d",
+            else => unreachable,
+        },
+        .base_mip_level = opts.baseMipLevel,
+        .mip_level_count = opts.mipLevelCount,
+        .base_array_layer = opts.baseArrayLayer,
+        .array_layer_count = opts.arrayLayerCount,
+        .aspect = switch (opts.aspect) {
+            c.WGPUTextureAspect_All => .all,
+            c.WGPUTextureAspect_StencilOnly => .stencil_only,
+            c.WGPUTextureAspect_DepthOnly => .depth_only,
+            else => unreachable,
+        },
+    }) catch {
+        allocator.destroy(view);
+        return null;
+    };
+    return view;
+}
+
+export fn wgpuTextureViewDestroy(self: *zgpu.TextureView) void {
+    self.deinit();
+    allocator.destroy(self);
 }
 
 //// Internal functions for conversions to and from Zig types

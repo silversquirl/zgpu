@@ -20,5 +20,7 @@ WGPU_EXPORT void wgpuPipelineLayoutDestroy(WGPUPipelineLayout layout);
 WGPU_EXPORT void wgpuRenderPipelineDestroy(WGPURenderPipeline pipeline);
 WGPU_EXPORT void wgpuShaderModuleDestroy(WGPUShaderModule module);
 WGPU_EXPORT void wgpuSurfaceDestroy(WGPUSurface surface);
+WGPU_EXPORT void wgpuSwapChainDestroy(WGPUSwapChain swapchain);
+WGPU_EXPORT void wgpuTextureViewDestroy(WGPUTextureView view);
 
 #endif // ZGPU_H_

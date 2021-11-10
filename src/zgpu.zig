@@ -200,6 +200,7 @@ pub const Adapter = struct {
 
 pub const Device = struct {
     vk_alloc: ?*const vk.AllocationCallbacks,
+    adapter: Adapter, // Required for swapchain creation
     vkd: vk.DeviceDispatch,
     dev: vk.Device,
 
@@ -314,6 +315,10 @@ pub const Surface = struct {
     }
 
     pub fn getPreferredFormat(self: Surface, adapter: Adapter) !TextureFormat {
+        const format = try self.getPreferredFormatVk(adapter);
+        return format.format;
+    }
+    fn getPreferredFormatVk(self: Surface, adapter: Adapter) !vk.SurfaceFormatKHR {
         // TODO: using the first one might not be the correct thing to do here
         var count: u32 = 1;
         var formats: [1]vk.SurfaceFormatKHR = undefined;
@@ -323,7 +328,7 @@ pub const Surface = struct {
             &count,
             &formats,
         );
-        return formats[0].format;
+        return formats[0];
     }
 };
 
@@ -401,8 +406,6 @@ pub const PipelineLayout = struct {
         self.d.vkd.destroyPipelineLayout(self.d.dev, self.layout, self.d.vk_alloc);
     }
 };
-
-pub const TextureFormat = vk.Format;
 
 pub const ConstantEntry = struct {
     key: [:0]const u8,
@@ -884,4 +887,182 @@ pub const RenderPipeline = struct {
         self.d.vkd.destroyPipeline(self.d.dev, self.pipeline, self.d.vk_alloc);
         self.d.vkd.destroyRenderPass(self.d.dev, self.pass, self.d.vk_alloc);
     }
+};
+
+pub const SwapChain = struct {
+    d: *const Device,
+    chain: vk.SwapchainKHR,
+    views: []const TextureView,
+
+    pub const InitOptions = struct {
+        usage: TextureUsage,
+        format: TextureFormat,
+        width: u32,
+        height: u32,
+        present_mode: PresentMode,
+    };
+    pub const PresentMode = enum {
+        immediate,
+        mailbox,
+        fifo,
+    };
+
+    pub fn init(dev: *const Device, surf: Surface, opts: InitOptions) !SwapChain {
+        const surf_format = try surf.getPreferredFormatVk(dev.adapter);
+        const swapchain = try dev.vkd.createSwapchainKHR(dev.dev, .{
+            .flags = .{},
+            .surface = surf.surf,
+            .min_image_count = 2, // TODO: this might not be right, idk
+            .image_format = opts.format,
+            .image_color_space = surf_format.color_space,
+            .image_extent = .{
+                .width = opts.width,
+                .height = opts.height,
+            },
+            .image_array_layers = 1,
+            .image_usage = .{
+                .transfer_src_bit = opts.usage.copy_src,
+                .transfer_dst_bit = opts.usage.copy_dst,
+                .sampled_bit = opts.usage.texture_binding,
+                .storage_bit = opts.usage.storage_binding,
+                .color_attachment_bit = opts.usage.render_attachment,
+                .depth_stencil_attachment_bit = opts.usage.render_attachment, // TODO: Not sure about this
+            },
+            .image_sharing_mode = .exclusive, // FIXME: this is probably wrong but I'm lazy
+            .queue_family_index_count = 0,
+            .p_queue_family_indices = undefined,
+            .pre_transform = .{ .identity_bit_khr = true },
+            .composite_alpha = .{ .inherit_bit_khr = true }, // TODO: extension to control this
+            .present_mode = switch (opts.present_mode) {
+                .immediate => .immediate_khr,
+                .mailbox => .mailbox_khr,
+                .fifo => .fifo_khr,
+            },
+            .clipped = vk.FALSE, // TODO: check if WebGPU actually requires this. If it does, add an extension to control it
+            .old_swapchain = .null_handle, // TODO: extension
+        }, dev.vk_alloc);
+        errdefer dev.vkd.destroySwapchainKHR(dev.dev, swapchain, dev.vk_alloc);
+
+        // Get swapchain images
+        const allocator = vk.allocator.unwrap(dev.vk_alloc);
+        var image_count: u32 = undefined;
+        _ = try dev.vkd.getSwapchainImagesKHR(dev.dev, swapchain, &image_count, null);
+        const images = try allocator.alloc(vk.Image, image_count);
+        defer allocator.free(images);
+        _ = try dev.vkd.getSwapchainImagesKHR(dev.dev, swapchain, &image_count, images.ptr);
+
+        // Wrap images in views
+        const views = try allocator.alloc(TextureView, image_count);
+        errdefer allocator.free(views);
+        for (images[0..image_count]) |img, i| {
+            views[i] = try TextureView.init(.{ .d = dev, .img = img }, .{
+                .format = opts.format,
+                .dimension = .@"2d",
+                .mip_level_count = 1,
+                .array_layer_count = 1,
+            });
+        }
+
+        return SwapChain{
+            .d = dev,
+            .chain = swapchain,
+            .views = views,
+        };
+    }
+
+    pub fn deinit(self: SwapChain) void {
+        for (self.views) |view| {
+            view.deinit();
+        }
+        const allocator = vk.allocator.unwrap(self.d.vk_alloc);
+        allocator.free(self.views);
+        self.d.vkd.destroySwapchainKHR(self.d.dev, self.chain, self.d.vk_alloc);
+    }
+
+    pub fn getCurrentTextureView(self: SwapChain) !TextureView {
+        const res = try self.d.vkd.acquireNextImageKHR(
+            self.d.dev,
+            self.chain,
+            std.time.ns_per_s, // If it takes this long, something's gone very wrong
+            .null_handle,
+            .null_handle,
+        );
+        switch (res.result) {
+            .success => {},
+            .timeout => return error.Timeout,
+            else => unreachable,
+        }
+        return self.views[res.image_index];
+    }
+};
+
+pub const Texture = struct {
+    d: *const Device,
+    img: vk.Image,
+};
+
+pub const TextureView = struct {
+    d: *const Device,
+    view: vk.ImageView,
+
+    pub const InitOptions = struct {
+        format: TextureFormat,
+        dimension: Dimension,
+        aspect: TextureAspect = .all,
+        base_mip_level: u32 = 0,
+        mip_level_count: u32,
+        base_array_layer: u32 = 0,
+        array_layer_count: u32,
+    };
+    pub const Dimension = vk.ImageViewType;
+
+    pub fn init(tex: Texture, opts: InitOptions) !TextureView {
+        const view = try tex.d.vkd.createImageView(tex.d.dev, .{
+            .flags = .{},
+            .image = tex.img,
+            .view_type = opts.dimension,
+            .format = opts.format,
+            .components = .{
+                .r = .identity,
+                .g = .identity,
+                .b = .identity,
+                .a = .identity,
+            },
+            .subresource_range = .{
+                .aspect_mask = switch (opts.aspect) {
+                    .all => vk.ImageAspectFlags{
+                        .color_bit = true,
+                        .depth_bit = true,
+                        .stencil_bit = true,
+                    },
+                    .stencil_only => .{ .stencil_bit = true },
+                    .depth_only => .{ .depth_bit = true },
+                },
+                .base_mip_level = opts.base_mip_level,
+                .level_count = opts.mip_level_count,
+                .base_array_layer = opts.base_array_layer,
+                .layer_count = opts.array_layer_count,
+            },
+        }, tex.d.vk_alloc);
+        return TextureView{ .d = tex.d, .view = view };
+    }
+
+    pub fn deinit(self: TextureView) void {
+        self.d.vkd.destroyImageView(self.d.dev, self.view, self.d.vk_alloc);
+    }
+};
+
+// TODO: move these to un-prefixed names under Texture?
+pub const TextureFormat = vk.Format;
+pub const TextureUsage = packed struct {
+    copy_src: bool = false,
+    copy_dst: bool = false,
+    texture_binding: bool = false,
+    storage_binding: bool = false,
+    render_attachment: bool = false,
+};
+pub const TextureAspect = enum {
+    all,
+    stencil_only,
+    depth_only,
 };
