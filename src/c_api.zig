@@ -440,9 +440,29 @@ export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
     allocator.destroy(self);
 }
 
+export fn wgpuDeviceGetQueue(self: *zgpu.Device) ?*zgpu.Queue {
+    const queue = allocator.create(zgpu.Queue) catch return null;
+    queue.* = self.getQueue();
+    return queue;
+}
+
 export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
     self.deinit();
     allocator.destroy(self);
+}
+
+export fn wgpuQueueSubmit(
+    self: *zgpu.Queue,
+    command_count: u32,
+    commands: [*]const *zgpu.CommandBuffer,
+) void {
+    // TODO: handle OOM better
+    const buffers = allocator.alloc(zgpu.CommandBuffer, command_count) catch @panic("Out of memory");
+    defer allocator.free(buffers);
+    for (commands[0..command_count]) |buf, i| {
+        buffers[i] = buf.*;
+    }
+    self.submit(buffers) catch |err| @panic(@errorName(err));
 }
 
 export fn wgpuRenderPassEndPass(c_enc: c.WGPURenderPassEncoder) void {

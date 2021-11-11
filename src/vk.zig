@@ -16,6 +16,7 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
     .CreateDevice,
     .DestroyInstance,
     .DestroySurfaceKHR,
+
     .EnumeratePhysicalDevices,
     .GetDeviceProcAddr,
     .GetPhysicalDeviceProperties,
@@ -24,8 +25,6 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
 });
 
 pub const DeviceDispatch = vk.DeviceWrapper(.{
-    .AcquireNextImageKHR,
-    .AllocateCommandBuffers,
     .CreateCommandPool,
     .CreateFramebuffer,
     .CreateGraphicsPipelines,
@@ -34,6 +33,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .CreateRenderPass,
     .CreateShaderModule,
     .CreateSwapchainKHR,
+
     .DestroyCommandPool,
     .DestroyDevice,
     .DestroyImageView,
@@ -42,7 +42,12 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .DestroyRenderPass,
     .DestroyShaderModule,
     .DestroySwapchainKHR,
+
+    .AcquireNextImageKHR,
+    .AllocateCommandBuffers,
+    .GetDeviceQueue,
     .GetSwapchainImagesKHR,
+    .QueueSubmit,
 
     .CmdBeginRenderPass,
     .CmdBindPipeline,

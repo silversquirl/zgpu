@@ -275,6 +275,74 @@ pub const Device = struct {
         self.vkd.destroyCommandPool(self.dev, self.graphics_pool, self.vk_alloc);
         self.vkd.destroyDevice(self.dev, self.vk_alloc);
     }
+
+    pub fn getQueue(self: *const Device) Queue {
+        return .{
+            .d = self,
+            .graphics = self.vkd.getDeviceQueue(self.dev, self.adapter.graphics_family, 0),
+            .compute = self.vkd.getDeviceQueue(self.dev, self.adapter.compute_family, 0),
+        };
+    }
+};
+
+pub const Queue = struct {
+    d: *const Device,
+    graphics: vk.Queue,
+    compute: vk.Queue,
+
+    pub fn submit(self: Queue, buffers: []const CommandBuffer) !void {
+        const allocator = vk.allocator.unwrap(self.d.vk_alloc);
+        const vk_buffers = try allocator.alloc(vk.CommandBuffer, buffers.len);
+        defer allocator.free(vk_buffers);
+
+        // Find the number of graphics buffers vs compute buffers
+        var compute_offset: usize = 0;
+        for (buffers) |buf| {
+            switch (buf.kind) {
+                .graphics => compute_offset += 1,
+                .compute => {},
+            }
+        }
+
+        for (buffers) |buf, i| {
+            const idx = switch (buf.kind) {
+                .graphics => i,
+                .compute => i + compute_offset,
+            };
+            vk_buffers[idx] = buf.buf;
+        }
+
+        const graphics_buffers = vk_buffers[0..compute_offset];
+        const compute_buffers = vk_buffers[vk_buffers.len - compute_offset ..];
+
+        if (graphics_buffers.len > 0) {
+            try self.d.vkd.queueSubmit(self.graphics, 1, &[1]vk.SubmitInfo{.{
+                .wait_semaphore_count = 0,
+                .p_wait_semaphores = undefined,
+                .p_wait_dst_stage_mask = undefined,
+
+                .command_buffer_count = @intCast(u32, graphics_buffers.len),
+                .p_command_buffers = graphics_buffers.ptr,
+
+                .signal_semaphore_count = 0,
+                .p_signal_semaphores = undefined,
+            }}, .null_handle);
+        }
+
+        if (compute_buffers.len > 0) {
+            try self.d.vkd.queueSubmit(self.compute, 1, &[1]vk.SubmitInfo{.{
+                .wait_semaphore_count = 0,
+                .p_wait_semaphores = undefined,
+                .p_wait_dst_stage_mask = undefined,
+
+                .command_buffer_count = @intCast(u32, compute_buffers.len),
+                .p_command_buffers = compute_buffers.ptr,
+
+                .signal_semaphore_count = 0,
+                .p_signal_semaphores = undefined,
+            }}, .null_handle);
+        }
+    }
 };
 
 pub const Limits = struct {
@@ -1301,6 +1369,11 @@ pub const CommandEncoder = struct {
         // Call the function
         @call(.{}, @field(vk.DeviceDispatch, full_name), full_args);
     }
+};
+
+pub const CommandBuffer = struct {
+    buf: vk.CommandBuffer,
+    kind: enum { graphics, compute },
 };
 
 pub const RenderPassEncoder = extern struct {
