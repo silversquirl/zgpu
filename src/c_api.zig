@@ -125,7 +125,7 @@ export fn wgpuCommandEncoderBeginRenderPass(
     opts: *const c.WGPURenderPassDescriptor,
 ) c.WGPURenderPassEncoder {
     const pass = commandEncoderBeginRenderPassInternal(self, opts) catch return null;
-    return @intToPtr(c.WGPURenderPassEncoder, @bitCast(usize, pass));
+    return convertSmall(c.WGPURenderPassEncoder, pass);
 }
 fn commandEncoderBeginRenderPassInternal(
     self: *zgpu.CommandEncoder,
@@ -445,6 +445,30 @@ export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
     allocator.destroy(self);
 }
 
+export fn wgpuRenderPassEndPass(c_enc: c.WGPURenderPassEncoder) void {
+    const self = convertSmall(zgpu.RenderPassEncoder, c_enc);
+    self.endPass();
+}
+
+export fn wgpuRenderPassEncoderSetPipeline(
+    c_enc: c.WGPURenderPassEncoder,
+    pipeline: *zgpu.RenderPipeline,
+) void {
+    const self = convertSmall(zgpu.RenderPassEncoder, c_enc);
+    self.setPipeline(pipeline.*);
+}
+
+export fn wgpuRenderPassEncoderDraw(
+    c_enc: c.WGPURenderPassEncoder,
+    vertex_count: u32,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,
+) void {
+    const self = convertSmall(zgpu.RenderPassEncoder, c_enc);
+    self.draw(vertex_count, instance_count, first_vertex, first_instance);
+}
+
 export fn wgpuRenderPipelineDestroy(self: *zgpu.RenderPipeline) void {
     self.deinit();
     allocator.destroy(self);
@@ -521,6 +545,18 @@ export fn wgpuTextureViewDestroy(self: *zgpu.TextureView) void {
 /// Casts both pointer type and alignment
 fn convertPointer(comptime Ptr: type, value: anytype) Ptr {
     return @ptrCast(Ptr, @alignCast(std.meta.alignment(Ptr), value));
+}
+
+/// Bitcasts a value to or from a pointer type
+fn convertSmall(comptime T: type, value: anytype) T {
+    const ti = @typeInfo(T);
+    if (ti == .Pointer or
+        (ti == .Optional and @typeInfo(ti.Optional.child) == .Pointer))
+    {
+        return @intToPtr(T, @bitCast(usize, value));
+    } else {
+        return @bitCast(T, @ptrToInt(value));
+    }
 }
 
 fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {

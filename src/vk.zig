@@ -45,6 +45,9 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .GetSwapchainImagesKHR,
 
     .CmdBeginRenderPass,
+    .CmdBindPipeline,
+    .CmdDraw,
+    .CmdEndRenderPass,
 });
 
 // Simple loader for base Vulkan functions

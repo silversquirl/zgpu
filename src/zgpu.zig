@@ -1287,10 +1287,42 @@ pub const CommandEncoder = struct {
 
         return RenderPassEncoder{ .enc = self };
     }
+
+    fn cmd(self: CommandEncoder, comptime name: @Type(.EnumLiteral), args: anytype) void {
+        // Turn commandName into cmdCommandName
+        const name_str = @tagName(name);
+        const full_name = "cmd" ++
+            [1]u8{std.ascii.toUpper(name_str[0])} ++
+            name_str[1..];
+
+        // Stick the dispatch and the buffer on the front of the arg list
+        const full_args = .{ self.d.vkd, self.buf } ++ args;
+
+        // Call the function
+        @call(.{}, @field(vk.DeviceDispatch, full_name), full_args);
+    }
 };
 
 pub const RenderPassEncoder = extern struct {
     enc: *CommandEncoder,
+
+    pub fn endPass(self: RenderPassEncoder) void {
+        self.enc.cmd(.endRenderPass, .{});
+    }
+
+    pub fn draw(
+        self: RenderPassEncoder,
+        vertex_count: u32,
+        instance_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) void {
+        self.enc.cmd(.draw, .{ vertex_count, instance_count, first_vertex, first_instance });
+    }
+
+    pub fn setPipeline(self: RenderPassEncoder, pipeline: RenderPipeline) void {
+        self.enc.cmd(.bindPipeline, .{ .graphics, pipeline.pipeline });
+    }
 };
 
 pub const LoadOp = vk.AttachmentLoadOp;
