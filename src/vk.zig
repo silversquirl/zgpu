@@ -48,6 +48,8 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .GetDeviceQueue,
     .GetSwapchainImagesKHR,
     .QueueSubmit,
+    .BeginCommandBuffer,
+    .EndCommandBuffer,
 
     .CmdBeginRenderPass,
     .CmdBindPipeline,

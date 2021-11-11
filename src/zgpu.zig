@@ -1175,7 +1175,7 @@ pub const TextureAspect = enum {
 //       buffers (using semaphores) if the graphics and compute queue families are different.
 pub const CommandEncoder = struct {
     d: *const Device,
-    state: enum { none, graphics, compute } = .none,
+    state: enum { init, graphics, compute, finished } = .init,
     buf: vk.CommandBuffer = undefined,
 
     pub fn init(dev: *const Device) CommandEncoder {
@@ -1184,9 +1184,10 @@ pub const CommandEncoder = struct {
 
     pub fn deinit(self: CommandEncoder) void {
         const pool = switch (self.state) {
-            .none => return,
+            .init => return,
             .graphics => self.d.graphics_pool,
             .compute => self.d.compute_pool,
+            .finished => unreachable,
         };
         self.d.vkd.freeCommandBuffers(self.d.dev, pool, &.{self.buf}, self.d.vk_alloc);
     }
@@ -1221,7 +1222,7 @@ pub const CommandEncoder = struct {
 
     pub fn beginRenderPass(self: *CommandEncoder, opts: RenderPassOptions) !RenderPassEncoder {
         switch (self.state) {
-            .none => {
+            .init => {
                 self.state = .graphics;
                 var bufs: [1]vk.CommandBuffer = undefined;
                 try self.d.vkd.allocateCommandBuffers(self.d.dev, .{
@@ -1230,9 +1231,15 @@ pub const CommandEncoder = struct {
                     .command_buffer_count = 1,
                 }, &bufs);
                 self.buf = bufs[0];
+
+                try self.d.vkd.beginCommandBuffer(self.buf, .{
+                    .flags = .{ .one_time_submit_bit = true },
+                    .p_inheritance_info = undefined,
+                });
             },
             .graphics => {},
             .compute => @panic("TODO: allow mixing graphics and compute"),
+            .finished => unreachable,
         }
 
         if (opts.occlusion_query_set != null) {
@@ -1356,7 +1363,23 @@ pub const CommandEncoder = struct {
         return RenderPassEncoder{ .enc = self };
     }
 
+    pub fn finish(self: *CommandEncoder) !CommandBuffer {
+        const kind: CommandBuffer.Kind = switch (self.state) {
+            .init => .graphics, // We need to choose one :)
+            .graphics => .graphics,
+            .compute => .compute,
+            .finished => unreachable,
+        };
+        try self.d.vkd.endCommandBuffer(self.buf);
+        return CommandBuffer{
+            .buf = self.buf,
+            .kind = kind,
+        };
+    }
+
     fn cmd(self: CommandEncoder, comptime name: @Type(.EnumLiteral), args: anytype) void {
+        std.debug.assert(self.state != .finished);
+
         // Turn commandName into cmdCommandName
         const name_str = @tagName(name);
         const full_name = "cmd" ++
@@ -1373,7 +1396,8 @@ pub const CommandEncoder = struct {
 
 pub const CommandBuffer = struct {
     buf: vk.CommandBuffer,
-    kind: enum { graphics, compute },
+    kind: Kind,
+    const Kind = enum { graphics, compute };
 };
 
 pub const RenderPassEncoder = extern struct {

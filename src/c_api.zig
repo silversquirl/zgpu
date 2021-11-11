@@ -173,6 +173,19 @@ fn commandEncoderBeginRenderPassInternal(
     });
 }
 
+export fn wgpuCommandEncoderFinish(
+    self: *zgpu.CommandEncoder,
+    opts: *const c.WGPUCommandBufferDescriptor,
+) ?*zgpu.CommandBuffer {
+    _ = opts; // We don't care about label
+    const buffer = allocator.create(zgpu.CommandBuffer) catch return null;
+    buffer.* = self.finish() catch {
+        allocator.destroy(buffer);
+        return null;
+    };
+    return buffer;
+}
+
 export fn wgpuDeviceCreateCommandEncoder(
     self: *zgpu.Device,
     opts: *const c.WGPUCommandEncoderDescriptor,
