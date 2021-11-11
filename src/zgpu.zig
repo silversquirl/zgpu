@@ -200,9 +200,11 @@ pub const Adapter = struct {
 
 pub const Device = struct {
     vk_alloc: ?*const vk.AllocationCallbacks,
-    adapter: Adapter, // Required for swapchain creation
+    adapter: *const Adapter, // Required for swapchain creation
     vkd: vk.DeviceDispatch,
     dev: vk.Device,
+    graphics_pool: vk.CommandPool,
+    compute_pool: vk.CommandPool,
 
     pub const InitOptions = struct {
         // TODO: features
@@ -212,6 +214,7 @@ pub const Device = struct {
     pub fn init(adapter: *const Adapter, opts: InitOptions) !Device {
         var self: Device = undefined;
         self.vk_alloc = adapter.i.vkAlloc();
+        self.adapter = adapter;
 
         _ = opts; // TODO: check limits are acceptable
 
@@ -252,10 +255,24 @@ pub const Device = struct {
         self.vkd = try vk.DeviceDispatch.load(self.dev, adapter.i.vki.dispatch.vkGetDeviceProcAddr);
         errdefer self.vkd.destroyDevice(self.dev, self.vk_alloc);
 
+        self.graphics_pool = try self.vkd.createCommandPool(self.dev, .{
+            .flags = .{ .transient_bit = true },
+            .queue_family_index = adapter.graphics_family,
+        }, self.vk_alloc);
+        errdefer self.vkd.destroyCommandPool(self.dev, self.graphics_pool, self.vk_alloc);
+
+        self.compute_pool = try self.vkd.createCommandPool(self.dev, .{
+            .flags = .{ .transient_bit = true },
+            .queue_family_index = adapter.compute_family,
+        }, self.vk_alloc);
+        errdefer self.vkd.destroyCommandPool(self.dev, self.compute_pool, self.vk_alloc);
+
         return self;
     }
 
     pub fn deinit(self: Device) void {
+        self.vkd.destroyCommandPool(self.dev, self.compute_pool, self.vk_alloc);
+        self.vkd.destroyCommandPool(self.dev, self.graphics_pool, self.vk_alloc);
         self.vkd.destroyDevice(self.dev, self.vk_alloc);
     }
 };
@@ -594,8 +611,10 @@ pub const RenderPipeline = struct {
         //       with an incompatible render pass.
         var attachments: []vk.AttachmentDescription = &.{};
         defer allocator.free(attachments);
+        if (opts.depth_stencil != null) {
+            @panic("FIXME: depth_stencil needs to go in render pass attachments");
+        }
         if (opts.fragment) |frag| {
-            // FIXME: depth_stencil target needs to go in here too
             attachments = try allocator.alloc(vk.AttachmentDescription, frag.targets.len);
             for (frag.targets) |target, i| {
                 attachments[i] = .{
@@ -604,8 +623,8 @@ pub const RenderPipeline = struct {
                     .samples = multisample_count_vk,
                     .load_op = .load,
                     .store_op = .store,
-                    .stencil_load_op = .load,
-                    .stencil_store_op = .store,
+                    .stencil_load_op = .dont_care,
+                    .stencil_store_op = .dont_care,
                     .initial_layout = .general,
                     .final_layout = .general,
                 };
@@ -908,7 +927,7 @@ pub const SwapChain = struct {
     };
 
     pub fn init(dev: *const Device, surf: Surface, opts: InitOptions) !SwapChain {
-        const surf_format = try surf.getPreferredFormatVk(dev.adapter);
+        const surf_format = try surf.getPreferredFormatVk(dev.adapter.*);
         const swapchain = try dev.vkd.createSwapchainKHR(dev.dev, .{
             .flags = .{},
             .surface = surf.surf,
@@ -955,7 +974,15 @@ pub const SwapChain = struct {
         const views = try allocator.alloc(TextureView, image_count);
         errdefer allocator.free(views);
         for (images[0..image_count]) |img, i| {
-            views[i] = try TextureView.init(.{ .d = dev, .img = img }, .{
+            views[i] = try TextureView.init(.{
+                .d = dev,
+                .img = img,
+                .size = .{
+                    .width = opts.width,
+                    .height = opts.height,
+                    .depth = 1,
+                },
+            }, .{
                 .format = opts.format,
                 .dimension = .@"2d",
                 .mip_level_count = 1,
@@ -999,11 +1026,14 @@ pub const SwapChain = struct {
 pub const Texture = struct {
     d: *const Device,
     img: vk.Image,
+    size: vk.Extent3D,
 };
 
 pub const TextureView = struct {
     d: *const Device,
     view: vk.ImageView,
+    format: TextureFormat,
+    size: vk.Extent3D,
 
     pub const InitOptions = struct {
         format: TextureFormat,
@@ -1044,7 +1074,12 @@ pub const TextureView = struct {
                 .layer_count = opts.array_layer_count,
             },
         }, tex.d.vk_alloc);
-        return TextureView{ .d = tex.d, .view = view };
+        return TextureView{
+            .d = tex.d,
+            .view = view,
+            .format = opts.format,
+            .size = tex.size,
+        };
     }
 
     pub fn deinit(self: TextureView) void {
@@ -1065,4 +1100,214 @@ pub const TextureAspect = enum {
     all,
     stencil_only,
     depth_only,
+};
+
+// TODO: currently we only allow render or compute passes, not both. Obviously, we need to be able
+//       to mix them to comply with WebGPU spec. The way to do this is probably to sync two command
+//       buffers (using semaphores) if the graphics and compute queue families are different.
+pub const CommandEncoder = struct {
+    d: *const Device,
+    state: enum { none, graphics, compute } = .none,
+    buf: vk.CommandBuffer = undefined,
+
+    pub fn init(dev: *const Device) CommandEncoder {
+        return .{ .d = dev };
+    }
+
+    pub fn deinit(self: CommandEncoder) void {
+        const pool = switch (self.state) {
+            .none => return,
+            .graphics => self.d.graphics_pool,
+            .compute => self.d.compute_pool,
+        };
+        self.d.vkd.freeCommandBuffers(self.d.dev, pool, &.{self.buf}, self.d.vk_alloc);
+    }
+
+    pub const RenderPassOptions = struct {
+        color_attachments: []const ColorAttachment,
+        depth_stencil_attachment: ?DepthStencilAttachment = null,
+        occlusion_query_set: ?QuerySet = null,
+
+        pub const ColorAttachment = struct {
+            view: TextureView,
+            resolve_target: ?TextureView = null,
+            load_op: LoadOp,
+            store_op: StoreOp,
+            clear_color: Color,
+        };
+
+        pub const DepthStencilAttachment = struct {
+            view: TextureView,
+
+            depth_load_op: LoadOp,
+            depth_store_op: StoreOp,
+            clear_depth: f32,
+            depth_read_only: bool = false,
+
+            stencil_load_op: LoadOp,
+            stencil_store_op: StoreOp,
+            clear_stencil: u32,
+            stencil_read_only: bool = false,
+        };
+    };
+
+    pub fn beginRenderPass(self: *CommandEncoder, opts: RenderPassOptions) !RenderPassEncoder {
+        switch (self.state) {
+            .none => {
+                self.state = .graphics;
+                var bufs: [1]vk.CommandBuffer = undefined;
+                try self.d.vkd.allocateCommandBuffers(self.d.dev, .{
+                    .command_pool = self.d.graphics_pool,
+                    .level = .primary,
+                    .command_buffer_count = 1,
+                }, &bufs);
+                self.buf = bufs[0];
+            },
+            .graphics => {},
+            .compute => @panic("TODO: allow mixing graphics and compute"),
+        }
+
+        if (opts.occlusion_query_set != null) {
+            @panic("TODO: occlusion query set");
+        }
+
+        const allocator = vk.allocator.unwrap(self.d.vk_alloc);
+        const pass_attach = try allocator.alloc(
+            vk.AttachmentDescription,
+            opts.color_attachments.len + @boolToInt(opts.depth_stencil_attachment != null),
+        );
+        defer allocator.free(pass_attach);
+        const fbuf_attach = try allocator.alloc(vk.ImageView, pass_attach.len);
+        defer allocator.free(fbuf_attach);
+        const clear_values = try allocator.alloc(vk.ClearValue, pass_attach.len);
+        defer allocator.free(clear_values);
+
+        for (opts.color_attachments) |attach, i| {
+            pass_attach[i] = .{
+                .flags = .{ .may_alias_bit = true }, // TODO: do we actually need this? Check spec
+                .format = attach.view.format,
+                .samples = .{ .@"1_bit" = true }, // FIXME: detect from the image view
+                .load_op = attach.load_op,
+                .store_op = attach.store_op,
+                .stencil_load_op = .dont_care,
+                .stencil_store_op = .dont_care,
+                .initial_layout = .general,
+                .final_layout = .general,
+            };
+            if (attach.load_op != .load or attach.store_op != .store) {
+                @panic("TODO: make pipeline creation lazy");
+            }
+
+            fbuf_attach[i] = attach.view.view;
+
+            if (attach.load_op == .clear) {
+                clear_values[i] = .{
+                    .color = @panic("TODO: clear value type conversion"),
+                };
+            }
+        }
+
+        if (opts.depth_stencil_attachment) |attach| {
+            const i = pass_attach.len - 1;
+
+            pass_attach[i] = .{
+                .flags = .{ .may_alias_bit = true }, // TODO: do we actually need this? Check spec
+                .format = attach.view.format,
+                .samples = .{ .@"1_bit" = true }, // FIXME: detect from the image view
+                .load_op = attach.depth_load_op,
+                .store_op = attach.depth_store_op,
+                .stencil_load_op = attach.stencil_load_op,
+                .stencil_store_op = attach.stencil_store_op,
+                .initial_layout = .general,
+                .final_layout = .general,
+            };
+            if (attach.depth_load_op != .load or attach.depth_store_op != .store) {
+                @panic("TODO: make pipeline creation lazy");
+            }
+            if (attach.stencil_load_op != .load or attach.stencil_store_op != .store) {
+                @panic("TODO: make pipeline creation lazy");
+            }
+
+            fbuf_attach[i] = attach.view.view;
+
+            if (attach.depth_load_op == .clear or attach.stencil_load_op == .clear) {
+                clear_values[i] = .{
+                    .depth_stencil = .{
+                        .depth = attach.clear_depth,
+                        .stencil = attach.clear_stencil,
+                    },
+                };
+            }
+        }
+
+        // Create render pass
+        // TODO: caching
+        const render_pass = try self.d.vkd.createRenderPass(self.d.dev, .{
+            .flags = .{},
+            .attachment_count = @intCast(u32, pass_attach.len),
+            .p_attachments = pass_attach.ptr,
+            .subpass_count = 0,
+            .p_subpasses = undefined,
+            .dependency_count = 0,
+            .p_dependencies = undefined,
+        }, self.d.vk_alloc);
+
+        // Create framebuffer
+        // TODO: caching
+        const fbuf_size = if (opts.color_attachments.len > 0)
+            opts.color_attachments[0].view.size
+        else
+            opts.depth_stencil_attachment.?.view.size;
+        const framebuffer = try self.d.vkd.createFramebuffer(self.d.dev, .{
+            .flags = .{},
+            .render_pass = render_pass,
+            .attachment_count = @intCast(u32, fbuf_attach.len),
+            .p_attachments = fbuf_attach.ptr,
+            .width = fbuf_size.width,
+            .height = fbuf_size.height,
+            .layers = fbuf_size.depth,
+        }, self.d.vk_alloc);
+
+        // FIXME: render_pass and framebuffer need to be deleted
+
+        // Begin render pass on command buffer
+        self.d.vkd.cmdBeginRenderPass(self.buf, .{
+            .render_pass = render_pass,
+            .framebuffer = framebuffer,
+            .render_area = .{
+                .offset = .{ .x = 0, .y = 0 },
+                .extent = .{
+                    .width = fbuf_size.width,
+                    .height = fbuf_size.height,
+                },
+            },
+            .clear_value_count = @intCast(u32, clear_values.len),
+            .p_clear_values = clear_values.ptr,
+        }, .@"inline");
+
+        return RenderPassEncoder{ .enc = self };
+    }
+};
+
+pub const RenderPassEncoder = extern struct {
+    enc: *CommandEncoder,
+};
+
+pub const LoadOp = vk.AttachmentLoadOp;
+pub const StoreOp = vk.AttachmentStoreOp;
+
+pub const Color = struct {
+    r: f64,
+    g: f64,
+    b: f64,
+    a: f64,
+
+    pub fn rgba(r: f64, g: f64, b: f64, a: f64) Color {
+        return .{ .r = r, .g = g, .b = b, .a = a };
+    }
+};
+
+pub const QuerySet = struct {
+    d: *const Device,
+    // TODO
 };

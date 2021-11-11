@@ -120,9 +120,67 @@ fn adapterRequestDeviceInternal(
     return device;
 }
 
-export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
-    self.deinit();
-    allocator.destroy(self);
+export fn wgpuCommandEncoderBeginRenderPass(
+    self: *zgpu.CommandEncoder,
+    opts: *const c.WGPURenderPassDescriptor,
+) c.WGPURenderPassEncoder {
+    const pass = commandEncoderBeginRenderPassInternal(self, opts) catch return null;
+    return @intToPtr(c.WGPURenderPassEncoder, @bitCast(usize, pass));
+}
+fn commandEncoderBeginRenderPassInternal(
+    self: *zgpu.CommandEncoder,
+    opts: *const c.WGPURenderPassDescriptor,
+) !zgpu.RenderPassEncoder {
+    const color_attach = try allocator.alloc(
+        zgpu.CommandEncoder.RenderPassOptions.ColorAttachment,
+        opts.colorAttachmentCount,
+    );
+    defer allocator.free(color_attach);
+    for (opts.colorAttachments[0..opts.colorAttachmentCount]) |attach, i| {
+        color_attach[i] = .{
+            .view = convertPointer(*zgpu.TextureView, attach.view).*,
+            .resolve_target = if (attach.resolveTarget) |t|
+                convertPointer(*zgpu.TextureView, t).*
+            else
+                null,
+            .load_op = convertLoadOp(attach.loadOp),
+            .store_op = convertStoreOp(attach.storeOp),
+            .clear_color = .{
+                .r = attach.clearColor.r,
+                .g = attach.clearColor.g,
+                .b = attach.clearColor.b,
+                .a = attach.clearColor.a,
+            },
+        };
+    }
+
+    return self.beginRenderPass(.{
+        .color_attachments = color_attach,
+        .depth_stencil_attachment = if (opts.depthStencilAttachment) |ds| .{
+            .view = convertPointer(*zgpu.TextureView, ds.*.view).*,
+
+            .depth_load_op = convertLoadOp(ds.*.depthLoadOp),
+            .depth_store_op = convertStoreOp(ds.*.depthStoreOp),
+            .clear_depth = ds.*.clearDepth,
+            .depth_read_only = ds.*.depthReadOnly,
+
+            .stencil_load_op = convertLoadOp(ds.*.stencilLoadOp),
+            .stencil_store_op = convertStoreOp(ds.*.stencilStoreOp),
+            .clear_stencil = ds.*.clearStencil,
+            .stencil_read_only = ds.*.stencilReadOnly,
+        } else null,
+        .occlusion_query_set = convertPointer(*zgpu.QuerySet, opts.occlusionQuerySet).*,
+    });
+}
+
+export fn wgpuDeviceCreateCommandEncoder(
+    self: *zgpu.Device,
+    opts: *const c.WGPUCommandEncoderDescriptor,
+) ?*zgpu.CommandEncoder {
+    _ = opts; // We don't care about label
+    const encoder = allocator.create(zgpu.CommandEncoder) catch return null;
+    encoder.* = zgpu.CommandEncoder.init(self);
+    return encoder;
 }
 
 export fn wgpuDeviceCreatePipelineLayout(
@@ -377,6 +435,11 @@ export fn wgpuDeviceCreateSwapChain(
     return swapchain;
 }
 
+export fn wgpuDeviceDestroy(self: *zgpu.Device) void {
+    self.deinit();
+    allocator.destroy(self);
+}
+
 export fn wgpuPipelineLayoutDestroy(self: *zgpu.PipelineLayout) void {
     self.deinit();
     allocator.destroy(self);
@@ -457,7 +520,7 @@ export fn wgpuTextureViewDestroy(self: *zgpu.TextureView) void {
 
 /// Casts both pointer type and alignment
 fn convertPointer(comptime Ptr: type, value: anytype) Ptr {
-    return @ptrCast(Ptr, @alignCast(@alignOf(Ptr), value));
+    return @ptrCast(Ptr, @alignCast(std.meta.alignment(Ptr), value));
 }
 
 fn convertLimits(wlimits: c.WGPULimits) zgpu.Limits {
@@ -523,6 +586,21 @@ fn convertBlendFactor(fac: c.WGPUBlendFactor) zgpu.RenderPipeline.FragmentState.
         // FIXME: constant might differ depending on whether it's alpha or color, maybe don't use the vk type here
         c.WGPUBlendFactor_Constant => .constant_color,
         c.WGPUBlendFactor_OneMinusConstant => .one_minus_constant_color,
+        else => unreachable,
+    };
+}
+
+fn convertLoadOp(op: c.WGPULoadOp) zgpu.LoadOp {
+    return switch (op) {
+        c.WGPULoadOp_Clear => .clear,
+        c.WGPULoadOp_Load => .load,
+        else => unreachable,
+    };
+}
+fn convertStoreOp(op: c.WGPUStoreOp) zgpu.StoreOp {
+    return switch (op) {
+        c.WGPUStoreOp_Store => .store,
+        c.WGPUStoreOp_Discard => .dont_care,
         else => unreachable,
     };
 }

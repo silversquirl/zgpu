@@ -25,12 +25,16 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
 
 pub const DeviceDispatch = vk.DeviceWrapper(.{
     .AcquireNextImageKHR,
+    .AllocateCommandBuffers,
+    .CreateCommandPool,
+    .CreateFramebuffer,
     .CreateGraphicsPipelines,
     .CreateImageView,
     .CreatePipelineLayout,
     .CreateRenderPass,
     .CreateShaderModule,
     .CreateSwapchainKHR,
+    .DestroyCommandPool,
     .DestroyDevice,
     .DestroyImageView,
     .DestroyPipeline,
@@ -39,6 +43,8 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .DestroyShaderModule,
     .DestroySwapchainKHR,
     .GetSwapchainImagesKHR,
+
+    .CmdBeginRenderPass,
 });
 
 // Simple loader for base Vulkan functions
