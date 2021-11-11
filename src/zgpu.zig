@@ -279,9 +279,12 @@ pub const Device = struct {
     pub fn getQueue(self: *const Device) Queue {
         return .{
             .d = self,
-            .graphics = self.vkd.getDeviceQueue(self.dev, self.adapter.graphics_family, 0),
+            .graphics = self.getGraphicsQueue(),
             .compute = self.vkd.getDeviceQueue(self.dev, self.adapter.compute_family, 0),
         };
+    }
+    fn getGraphicsQueue(self: *const Device) vk.Queue {
+        return self.vkd.getDeviceQueue(self.dev, self.adapter.graphics_family, 0);
     }
 };
 
@@ -1088,6 +1091,18 @@ pub const SwapChain = struct {
             else => unreachable,
         }
         return self.views[res.image_index];
+    }
+
+    pub fn present(self: SwapChain) !void {
+        _ = try self.d.vkd.queuePresentKHR(self.d.getGraphicsQueue(), .{
+            .wait_semaphore_count = 0,
+            .p_wait_semaphores = undefined,
+
+            .swapchain_count = 1,
+            .p_swapchains = &[1]vk.SwapchainKHR{self.chain},
+            .p_image_indices = &[1]u32{0},
+            .p_results = null,
+        });
     }
 };
 

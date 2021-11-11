@@ -529,6 +529,10 @@ export fn wgpuSwapChainGetCurrentTextureView(self: *zgpu.SwapChain) ?*zgpu.Textu
     };
     return view;
 }
+export fn wgpuSwapChainPresent(self: *zgpu.SwapChain) void {
+    // FIXME: don't panic
+    self.present() catch |err| std.debug.panic("Swapchain present failed: {s}", .{@errorName(err)});
+}
 
 export fn wgpuSurfaceGetPreferredFormat(self: *zgpu.Surface, adapter: *zgpu.Adapter) c.WGPUTextureFormat {
     const format = self.getPreferredFormat(adapter.*) catch .@"undefined";
